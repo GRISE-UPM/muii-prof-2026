@@ -1,0 +1,43 @@
+# Dependencias
+node_modules/
+.pnp
+.pnp.js
+
+# Salida de compilación de Vite / React
+dist/
+build/
+out/
+.vite/
+*.local
+
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.development
+
+# Caché y cobertura
+.cache/
+.parcel-cache/
+coverage/
+.nyc_output/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# TypeScript / ESLint
+*.tsbuildinfo
+.eslintcache
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editores
+.idea/
+*.swp
+*~

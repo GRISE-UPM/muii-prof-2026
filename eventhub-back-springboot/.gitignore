@@ -1,0 +1,45 @@
+# Compilación de Maven / Gradle
+target/
+build/
+out/
+.gradle/
+bin/
+
+# Bytecode y empaquetados
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# Maven wrapper descargado
+.mvn/wrapper/maven-wrapper.jar
+
+# Entornos
+.env
+.env.local
+
+# Editores e IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.factorypath
+*.swp
+*~
+
+# Logs y base de datos local (H2)
+*.log
+*.db
+*.mv.db
+*.trace.db
+*.lock.db
+
+# Sistema operativo
+.DS_Store
+Thumbs.db

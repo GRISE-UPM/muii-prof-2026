@@ -1,0 +1,78 @@
+package es.upm.grise.profundizacion.eventhub.service;
+
+import es.upm.grise.profundizacion.eventhub.dto.CompraResponseDTO;
+import es.upm.grise.profundizacion.eventhub.dto.EventoRequestDTO;
+import es.upm.grise.profundizacion.eventhub.dto.EventoResponseDTO;
+import es.upm.grise.profundizacion.eventhub.model.Compra;
+import es.upm.grise.profundizacion.eventhub.model.Evento;
+import es.upm.grise.profundizacion.eventhub.repository.CompraRepository;
+import es.upm.grise.profundizacion.eventhub.repository.EventoRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class EventoServiceImpl implements EventoService {
+
+    private final EventoRepository eventoRepository;
+    private final CompraRepository compraRepository;
+
+    public EventoServiceImpl(EventoRepository eventoRepository, CompraRepository compraRepository) {
+        this.eventoRepository = eventoRepository;
+        this.compraRepository = compraRepository;
+    }
+
+    @Override
+    @Transactional
+    public EventoResponseDTO crearEvento(EventoRequestDTO dto) {
+        Evento evento = new Evento(dto.getNombre(), dto.getDescripcion(), dto.getPrecio(), dto.getAforoDisponible());
+        Evento guardado = eventoRepository.save(evento);
+        return mapToResponseDTO(guardado);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<EventoResponseDTO> buscarEventos(String nombre) {
+        List<Evento> eventos;
+        if (nombre == null || nombre.isBlank()) {
+            eventos = eventoRepository.findAll();
+        } else {
+            eventos = eventoRepository.findByNombreContainingIgnoreCase(nombre);
+        }
+        return eventos.stream()
+                .map(this::mapToResponseDTO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public CompraResponseDTO comprarEvento(Long id, String email) {
+        Evento evento = eventoRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Evento no encontrado con id: " + id));
+
+        if (evento.getAforoDisponible() <= 0) {
+            return new CompraResponseDTO("Aforo agotado para este evento", id, null);
+        }
+
+        evento.setAforoDisponible(evento.getAforoDisponible() - 1);
+        eventoRepository.save(evento);
+
+        Compra compra = new Compra(evento, email, LocalDateTime.now());
+        compraRepository.save(compra);
+
+        return new CompraResponseDTO("Entrada comprada con éxito", id, email);
+    }
+
+    private EventoResponseDTO mapToResponseDTO(Evento evento) {
+        return new EventoResponseDTO(
+                evento.getId(),
+                evento.getNombre(),
+                evento.getDescripcion(),
+                evento.getPrecio(),
+                evento.getAforoDisponible()
+        );
+    }
+}

@@ -1,0 +1,54 @@
+# Claves SSH de AWS Academy: nunca deben subirse al repositorio
+ssh-key/
+*.pem
+*.cer
+*.ppk
+*.key
+
+# Ficheros generados por aws-scripts (public-ip.txt)
+aws-scripts/*.txt
+
+# Temporales que crean los scripts de despliegue
+aws-scripts/nginx-config-file.sh
+aws-scripts/sftp-batch-file.txt
+
+# CDK / Python
+cdk/.venv/
+cdk/cdk.out/
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+htmlcov/
+.pytest_cache/
+
+# Logs y temporales
+*.tmp
+*.temp
+*.bak
+*.orig
+logs/
+
+# Sistema operativo
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# Editores e IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

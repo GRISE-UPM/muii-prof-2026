@@ -1,0 +1,112 @@
+body {
+  font-family: system-ui, sans-serif;
+  color: #1f2328;
+}
+
+h2 {
+  text-align: center;
+}
+
+.nav-api {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.btn {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: #f3f4f6;
+}
+
+.btn-activo {
+  background: #0969da;
+  border-color: #0969da;
+  color: #fff;
+}
+
+.btn-activo:hover {
+  background: #0757b8;
+}
+
+.btn-principal {
+  background: #1f883d;
+  border-color: #1f883d;
+  color: #fff;
+  align-self: center;
+  min-width: 8rem;
+}
+
+.btn-principal:hover {
+  background: #187332;
+}
+
+.api-panel {
+  max-width: 36rem;
+  margin: 1.25rem auto;
+  padding: 1.1rem 1.3rem;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  background: #f6f8fa;
+  text-align: center;
+}
+
+.api-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  text-align: left;
+}
+
+.api-panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.api-panel input {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+}
+
+.api-panel .ruta {
+  margin: 0.2rem 0 0.8rem;
+  color: #656d76;
+  font-size: 0.85rem;
+}
+
+.http-resultado {
+  margin: 0.9rem auto 0;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.http-ok {
+  background: #dafbe1;
+  border: 1px solid #1a7f37;
+}
+
+.http-err {
+  background: #ffebe9;
+  border: 1px solid #cf222e;
+}
+
+.http-resultado pre {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.7rem;
+  background: #fff;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
