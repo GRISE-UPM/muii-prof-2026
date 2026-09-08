@@ -2,9 +2,9 @@
 
 Aplicación para gestionar eventos, compuesta por:
 
-- `eventhub-back-springboot`: API REST Spring Boot con JPA, H2 y OpenAPI.
-- `eventhub-front-react`: aplicación React/Vite para la interfaz web.
-- `aws-scripts`: scripts para desplegar una instancia EC2, configurar Nginx y publicar el backend y el frontend.
+- `eventhub-back-springboot`: API REST Spring Boot con JPA, H2, seguridad OAuth2/JWT y OpenAPI.
+- `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT.
+- `aws-scripts`: scripts para desplegar una instancia EC2, configurar Nginx, crear Cognito y publicar el backend y el frontend.
 
 ## Requisitos
 
@@ -33,16 +33,21 @@ Aplicación para gestionar eventos, compuesta por:
 make deploy
 ```
 
-desde la raíz para crear EC2 y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Para eliminar frontend, backend, EC2 y los ficheros de configuración generados, lanza el rollback a mano:
+desde la raíz para crear EC2, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cognito no se borra: si el User Pool o el dominio ya existen, se reutilizan. Para eliminar frontend, backend, EC2 y los ficheros de la instancia:
 
 ```bash
-make rollback
+make delete
 ```
 
 ## Los scripts generan o actualizan estos ficheros:
 
 - `aws-scripts/public-ip.txt`: IP pública de la instancia EC2.
-- `eventhub-front-react/.env.production.local`: variables utilizadas por Vite en el build de producción.
+- `aws-scripts/callback-url.txt`: URL HTTPS a la que Cognito redirige tras el login.
+- `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
+- `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
+- `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
+
+Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-back-springboot/src/main/resources/`.
 
 ## La aplicación estará disponible en
 
@@ -69,4 +74,4 @@ npm install
 npm run dev
 ```
 
-La aplicación estará disponible normalmente en `http://localhost:3000`. En desarrollo las peticiones van a `http://localhost:8080` (`VITE_API_BASE_URL` en `.env.development`). El `build` de producción usa `.env.production.local` (generado por `front.sh`).
+La aplicación estará disponible normalmente en `http://localhost:3000`. En desarrollo las peticiones van a `http://localhost:8080` (`VITE_API_BASE_URL` en `.env.development`). El `build` de producción usa `.env.production.local` (generado por `front.sh`). Las variables de Cognito salen de `.env.local` (generado por `cognito.sh`).

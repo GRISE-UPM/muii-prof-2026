@@ -10,6 +10,7 @@ out/
 .vite/
 *.local
 
+# Configuración de Cognito generada por aws-scripts/cognito.sh
 .env
 .env.local
 .env.*.local

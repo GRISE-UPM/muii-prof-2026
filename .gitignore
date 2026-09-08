@@ -5,12 +5,16 @@ ssh-key/
 *.ppk
 *.key
 
-# Ficheros generados por aws-scripts (public-ip.txt)
+# Ficheros generados por aws-scripts (callback-url.txt, public-ip.txt)
 aws-scripts/*.txt
 
 # Temporales que crean los scripts de despliegue
 aws-scripts/nginx-config-file.sh
 aws-scripts/sftp-batch-file.txt
+
+# Configuración de Cognito generada por aws-scripts/cognito.sh
+.env.local
+cognito.properties
 
 # CDK / Python
 cdk/.venv/

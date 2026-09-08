@@ -6,8 +6,8 @@ const HTTP_DESCRIPCIONES = {
   201: "Created — el recurso se creó correctamente",
   204: "No Content — operación correcta, sin cuerpo de respuesta",
   400: "Bad Request — datos no válidos o regla de negocio (p. ej. aforo agotado)",
-  401: "Unauthorized — no autorizado",
-  403: "Forbidden — no hay permiso para esta operación",
+  401: "Unauthorized — no hay sesión o el token no es válido",
+  403: "Forbidden — autenticado, pero el rol no permite esta operación",
   404: "Not Found — no existe el recurso solicitado",
   405: "Method Not Allowed — el método HTTP no está permitido en esta ruta",
   409: "Conflict — el estado actual no permite la operación",
@@ -35,12 +35,13 @@ function cuerpoComoJson(text, status, descripcion) {
   };
 }
 
-export async function apiFetch(path, { method = "GET", body } = {}) {
+export async function apiFetch(path, { token, method = "GET", body } = {}) {
   try {
     const response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers: {
         Accept: "application/json",
+        Authorization: `Bearer ${token}`,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       body: body ? JSON.stringify(body) : undefined,

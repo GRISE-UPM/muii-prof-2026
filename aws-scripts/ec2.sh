@@ -7,6 +7,7 @@ SG_NAME="eventhub-sg"
 KEY_NAME="vockey"
 INSTANCE_TYPE="t2.micro"
 PUBLIC_IP_FILE="$SCRIPT_DIR/public-ip.txt"
+COGNITO_CALLBACK_URL_FILE="$SCRIPT_DIR/callback-url.txt"
 
 # Funcion para mostrar la ayuda
 usage() {
@@ -144,6 +145,9 @@ case "$ACTION" in
 
         # Guardar la IP para la instalación del frontend y backend
         echo "$PUBLIC_IP" > $PUBLIC_IP_FILE
+
+        # URL HTTPS a la que Cognito redirige tras el login (redirect_uri de la SPA)
+        echo "https://$PUBLIC_IP" > "$COGNITO_CALLBACK_URL_FILE"
 
         echo "Creación de instancia EC2 finalizada."
         ;;

@@ -7,6 +7,7 @@ import es.upm.grise.profundizacion.eventhub.model.Compra;
 import es.upm.grise.profundizacion.eventhub.model.Evento;
 import es.upm.grise.profundizacion.eventhub.repository.CompraRepository;
 import es.upm.grise.profundizacion.eventhub.repository.EventoRepository;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +50,7 @@ public class EventoServiceImpl implements EventoService {
 
     @Override
     @Transactional
-    public CompraResponseDTO comprarEvento(Long id, String email) {
+    public CompraResponseDTO comprarEvento(Long id, Jwt jwt) {
         Evento evento = eventoRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Evento no encontrado con id: " + id));
 
@@ -57,13 +58,21 @@ public class EventoServiceImpl implements EventoService {
             return new CompraResponseDTO("Aforo agotado para este evento", id, null);
         }
 
+        // Reduce el aforo
         evento.setAforoDisponible(evento.getAforoDisponible() - 1);
         eventoRepository.save(evento);
 
-        Compra compra = new Compra(evento, email, LocalDateTime.now());
+        // Extrae email o identificador del usuario desde el JWT
+        String userEmail = jwt.getClaimAsString("email");
+        if (userEmail == null) {
+            userEmail = jwt.getSubject();
+        }
+
+        // Registra y persiste la entidad Compra
+        Compra compra = new Compra(evento, userEmail, LocalDateTime.now());
         compraRepository.save(compra);
 
-        return new CompraResponseDTO("Entrada comprada con éxito", id, email);
+        return new CompraResponseDTO("Entrada comprada con éxito", id, userEmail);
     }
 
     private EventoResponseDTO mapToResponseDTO(Evento evento) {

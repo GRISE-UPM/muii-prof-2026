@@ -9,6 +9,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,23 +28,23 @@ public class EventoController {
     }
 
     @PostMapping
-    @Operation(summary = "Introducir evento", description = "Permite crear un nuevo evento.")
+    @Operation(summary = "Introducir evento", description = "Permite crear un nuevo evento. Requiere el rol ADMIN.")
     public ResponseEntity<EventoResponseDTO> crearEvento(@Valid @RequestBody EventoRequestDTO dto) {
         EventoResponseDTO respuesta = eventoService.crearEvento(dto);
         return ResponseEntity.status(HttpStatus.CREATED).body(respuesta);
     }
 
     @GetMapping("/buscar")
-    @Operation(summary = "Buscar eventos", description = "Permite buscar eventos por nombre o listar todos.")
+    @Operation(summary = "Buscar eventos", description = "Permite buscar eventos por nombre o listar todos. Requiere rol USER o ADMIN.")
     public ResponseEntity<List<EventoResponseDTO>> buscarEventos(@RequestParam(required = false, defaultValue = "") String nombre) {
         List<EventoResponseDTO> respuesta = eventoService.buscarEventos(nombre);
         return ResponseEntity.ok(respuesta);
     }
 
     @PostMapping("/{id}/comprar")
-    @Operation(summary = "Comprar entrada para evento", description = "Reduce el aforo y registra una compra en BD.")
-    public ResponseEntity<CompraResponseDTO> comprarEvento(@PathVariable Long id, @RequestParam String email) {
-        CompraResponseDTO respuesta = eventoService.comprarEvento(id, email);
+    @Operation(summary = "Comprar entrada para evento", description = "Reduce el aforo y registra una compra en BD. Requiere el rol USER.")
+    public ResponseEntity<CompraResponseDTO> comprarEvento(@PathVariable Long id, @AuthenticationPrincipal Jwt jwt) {
+        CompraResponseDTO respuesta = eventoService.comprarEvento(id, jwt);
         if ("Aforo agotado para este evento".equals(respuesta.getMensaje())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(respuesta);
         }
