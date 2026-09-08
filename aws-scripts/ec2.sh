@@ -8,6 +8,7 @@ KEY_NAME="vockey"
 INSTANCE_TYPE="t2.micro"
 PUBLIC_IP_FILE="$SCRIPT_DIR/public-ip.txt"
 COGNITO_CALLBACK_URL_FILE="$SCRIPT_DIR/callback-url.txt"
+SG_ID_FILE="$SCRIPT_DIR/sg-id.txt"
 
 # Funcion para mostrar la ayuda
 usage() {
@@ -148,6 +149,9 @@ case "$ACTION" in
 
         # URL HTTPS a la que Cognito redirige tras el login (redirect_uri de la SPA)
         echo "https://$PUBLIC_IP" > "$COGNITO_CALLBACK_URL_FILE"
+
+        # GroupId del SG compartido con Aurora
+        echo "$SG_ID" > "$SG_ID_FILE"
 
         echo "Creación de instancia EC2 finalizada."
         ;;

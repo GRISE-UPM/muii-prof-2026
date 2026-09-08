@@ -14,8 +14,9 @@ bin/
 hs_err_pid*
 replay_pid*
 
-# Configuración de Cognito generada por aws-scripts/cognito.sh
+# Configuración generada por aws-scripts (cognito.sh, aurora.sh)
 src/main/resources/cognito.properties
+src/main/resources/aurora.properties
 
 # Maven wrapper descargado
 .mvn/wrapper/maven-wrapper.jar
