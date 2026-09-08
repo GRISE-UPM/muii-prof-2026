@@ -6,6 +6,7 @@ AWS_SCRIPTS := aws-scripts
 
 deploy:
 	bash $(AWS_SCRIPTS)/ec2.sh create
+	bash $(AWS_SCRIPTS)/secrets.sh create
 	bash $(AWS_SCRIPTS)/nginx.sh deploy
 	bash $(AWS_SCRIPTS)/cognito.sh create
 	bash $(AWS_SCRIPTS)/back.sh deploy
@@ -15,8 +16,10 @@ deploy:
 delete:
 	bash $(AWS_SCRIPTS)/front.sh delete
 	bash $(AWS_SCRIPTS)/back.sh delete
+	bash $(AWS_SCRIPTS)/secrets.sh delete
 	bash $(AWS_SCRIPTS)/ec2.sh delete
 	rm -f $(AWS_SCRIPTS)/public-ip.txt \
 		$(AWS_SCRIPTS)/callback-url.txt \
+		$(AWS_SCRIPTS)/sg-id.txt \
 		eventhub-front-react/.env.production.local
 	@echo "Eliminación completa finalizada correctamente."
