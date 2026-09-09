@@ -2,9 +2,9 @@
 
 Aplicación para gestionar eventos, compuesta por:
 
-- `eventhub-back-springboot`: API REST Spring Boot con JPA, H2, seguridad OAuth2/JWT y OpenAPI.
+- `eventhub-back-springboot`: API REST Spring Boot con JPA, H2 (credenciales en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI.
 - `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT.
-- `aws-scripts`: scripts para desplegar una instancia EC2, configurar Nginx, crear Cognito y publicar el backend y el frontend.
+- `aws-scripts`: scripts para desplegar una instancia EC2, crear el secreto de la base de datos, configurar Nginx, crear Cognito y publicar el backend y el frontend.
 
 ## Requisitos
 
@@ -18,7 +18,7 @@ Aplicación para gestionar eventos, compuesta por:
 
 ### Configura las credenciales de AWS:
 
-- Descarga las credenciales desde AWS Academy y almacénalas en ~/aws/credentials
+- Descarga las credenciales desde AWS Academy y almacénalas en ~/.aws/credentials
 - Descarga la SSH key y almacénala en ssh-key/
 
 ## Configuración inicial
@@ -33,7 +33,7 @@ Aplicación para gestionar eventos, compuesta por:
 make deploy
 ```
 
-desde la raíz para crear EC2, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cognito no se borra: si el User Pool o el dominio ya existen, se reutilizan. Para eliminar frontend, backend, EC2 y los ficheros de la instancia:
+desde la raíz para crear EC2, crear el secreto de la base de datos, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cognito no se borra: si el User Pool o el dominio ya existen, se reutilizan. Para eliminar frontend, backend, el secreto, EC2 y los ficheros de la instancia:
 
 ```bash
 make delete
@@ -48,6 +48,17 @@ make delete
 - `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
 
 Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-back-springboot/src/main/resources/`.
+
+## Credenciales de la base de datos
+
+El backend usa H2 en memoria, pero su usuario y su contraseña no están en el repositorio: se guardan en AWS Secrets Manager, en el secreto `prod/h2/admin` que crea `aws-scripts/secrets.sh`.
+
+- La contraseña la genera Secrets Manager (`--generate-secret-string`): no se escribe a mano ni se imprime por pantalla.
+- El JSON del secreto contiene `username`, `password` y `dbname`.
+- Spring Boot lo importa con `spring.config.import=aws-secretsmanager:/prod/h2/admin` y construye la URL `jdbc:h2:mem:${dbname}`.
+- Los tests no necesitan AWS: `src/test/resources/application.properties` arranca H2 con credenciales fijas.
+
+`make delete` elimina el secreto sin periodo de recuperación.
 
 ## La aplicación estará disponible en
 

@@ -1,13 +1,11 @@
 #!/bin/bash
 
-# Credenciales de Aurora para Spring Boot (username, password, host, port, dbname).
-SECRET_NAME="prod/aurora/admin"
+# Credenciales de la base de datos para Spring Boot (username, password, dbname).
+# H2 es embebida: no hay host ni puerto que guardar en el secreto.
+SECRET_NAME="prod/h2/admin"
 
 DB_USER="admin"
-DB_HOST="eventhub-cluster-aurora.cluster-c1234567890.us-east-1.rds.amazonaws.com" # Endpoint del Cluster (Writer)
 DB_NAME="eventhub"
-DB_ENGINE="aurora-postgresql" # Usar "aurora-mysql" si es MySQL
-DB_PORT=5432                  # Usar 3306 si es MySQL
 
 
 
@@ -34,17 +32,11 @@ case "$ACTION" in
         # en qué clave inserta AWS la password.
         GENERATE_SPEC=$(jq -c -n \
           --arg user "$DB_USER" \
-          --arg host "$DB_HOST" \
           --arg dbname "$DB_NAME" \
-          --arg engine "$DB_ENGINE" \
-          --argjson port "$DB_PORT" \
           '{
             SecretStringTemplate: ({
               username: $user,
-              host: $host,
-              port: $port,
-              dbname: $dbname,
-              engine: $engine
+              dbname: $dbname
             } | tostring),
             GenerateStringKey: "password",
             PasswordLength: 32,
@@ -57,10 +49,10 @@ case "$ACTION" in
         # --generate-secret-string: AWS genera la password y la mete en el JSON
         # --query: Solo el ARN, para no imprimir el SecretString
         # ARN (Amazon Resource Name): identificador único del recurso en AWS
-        # (servicio, región, cuenta y nombre; p. ej. arn:aws:secretsmanager:us-east-1:123:secret:prod/aurora/admin-AbCdEf)
+        # (servicio, región, cuenta y nombre; p. ej. arn:aws:secretsmanager:us-east-1:123:secret:prod/h2/admin-AbCdEf)
         SECRET_ARN=$(aws secretsmanager create-secret \
             --name "$SECRET_NAME" \
-            --description "Credenciales de administración ($DB_USER) para la base de datos '$DB_NAME' ($DB_ENGINE)." \
+            --description "Credenciales de administración ($DB_USER) para la base de datos '$DB_NAME'." \
             --generate-secret-string "$GENERATE_SPEC" \
             --query ARN \
             --output text)

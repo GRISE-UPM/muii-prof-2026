@@ -42,10 +42,14 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults())
 
+            // Deshabilita la restricción de Frames (necesario para desplegar correctamente la consola H2 en iframe)
+            // TODO: Se podrá activar cuando migremos a una base de datos convencional
+            .headers(headers -> headers.frameOptions(frame -> frame.disable()))
+
             // Configuración de autorización basada en endpoints HTTP
             .authorizeHttpRequests(auth -> auth
-                // Permite acceso público sin autenticación a la documentación Swagger/OpenAPI
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                // Permite acceso público sin autenticación a la documentación Swagger/OpenAPI y la consola H2
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/h2-console/**").permitAll()
                 
                 // Creación de eventos: Exclusivo para usuarios con rol ADMIN
                 .requestMatchers(HttpMethod.POST, "/api/eventos").hasRole("ADMIN")
