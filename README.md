@@ -2,9 +2,9 @@
 
 Aplicación para gestionar eventos, compuesta por:
 
-- `eventhub-back-springboot`: API REST Spring Boot con JPA, H2, seguridad OAuth2/JWT y OpenAPI.
+- `eventhub-back-springboot`: API REST Spring Boot con JPA, Aurora PostgreSQL (usando las credenciales que Aurora almacena en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI.
 - `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT.
-- `aws-scripts`: scripts para desplegar una instancia EC2, configurar Nginx, crear Cognito y publicar el backend y el frontend.
+- `aws-scripts`: scripts para desplegar una instancia EC2, crear el clúster Aurora, configurar Nginx, crear Cognito y publicar el backend y el frontend.
 
 ## Requisitos
 
@@ -18,7 +18,7 @@ Aplicación para gestionar eventos, compuesta por:
 
 ### Configura las credenciales de AWS:
 
-- Descarga las credenciales desde AWS Academy y almacénalas en ~/aws/credentials
+- Descarga las credenciales desde AWS Academy y almacénalas en ~/.aws/credentials
 - Descarga la SSH key y almacénala en ssh-key/
 
 ## Configuración inicial
@@ -33,7 +33,7 @@ Aplicación para gestionar eventos, compuesta por:
 make deploy
 ```
 
-desde la raíz para crear EC2, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cognito no se borra: si el User Pool o el dominio ya existen, se reutilizan. Para eliminar frontend, backend, EC2 y los ficheros de la instancia:
+desde la raíz para crear EC2, crear el clúster Aurora, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. La creación de Aurora tarda varios minutos. Cognito no se borra: si el User Pool o el dominio ya existen, se reutilizan. Para eliminar frontend, backend, Aurora, EC2 y los ficheros de la instancia:
 
 ```bash
 make delete
@@ -42,12 +42,27 @@ make delete
 ## Los scripts generan o actualizan estos ficheros:
 
 - `aws-scripts/public-ip.txt`: IP pública de la instancia EC2.
+- `aws-scripts/sg-id.txt`: identificador del grupo de seguridad que comparten EC2 y Aurora.
+- `aws-scripts/db-cluster-id.txt`: identificador del clúster Aurora.
 - `aws-scripts/callback-url.txt`: URL HTTPS a la que Cognito redirige tras el login.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
 - `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
+- `eventhub-back-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot.
 
 Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-back-springboot/src/main/resources/`.
+
+## Credenciales de la base de datos
+
+El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el repositorio: los crea el propio clúster al desplegarse y quedan en AWS Secrets Manager.
+
+- `aws rds create-db-cluster --manage-master-user-password` hace que Aurora genere la contraseña y el secreto: no se escribe a mano ni viaja por la CLI.
+- El nombre del secreto lo asigna RDS (`rds!cluster-...`), por lo que `aurora.sh` lo consulta y lo escribe en `aurora.properties`.
+- El JSON del secreto contiene `username`, `password`, `host`, `port` y `dbname`, con los que Spring Boot construye `jdbc:postgresql://${host}:${port}/${dbname}`.
+- Aurora es accesible solo desde la VPC: `aurora.sh` abre el puerto 5432 en el grupo de seguridad de EC2 y únicamente para el tráfico de ese mismo grupo.
+- Los tests no necesitan AWS: `src/test/resources/application.properties` arranca H2 en memoria con credenciales fijas.
+
+`make delete` elimina la instancia, el clúster y su subnet group; RDS se encarga de retirar el secreto.
 
 ## La aplicación estará disponible en
 

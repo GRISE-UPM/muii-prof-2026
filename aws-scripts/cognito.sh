@@ -1,5 +1,4 @@
 #!/bin/bash
-set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -17,7 +16,7 @@ OAUTH_SCOPES="openid email profile"
 REFRESH_TOKEN_VALIDITY_DAYS=30
 
 # Validar que se reciba exactamente un parametro
-if [ -z "${1:-}" ] || [ -n "${2:-}" ]; then
+if [ -z "$1" ] || [ -n "$2" ]; then
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
