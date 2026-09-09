@@ -45,7 +45,11 @@ class EventoControllerTest {
     @Test
     @DisplayName("POST /api/eventos - Crear Evento con rol ADMIN responde 201 Created")
     void testCrearEvento_ConRolAdmin() throws Exception {
-        EventoRequestDTO requestDTO = new EventoRequestDTO("Festival de Cine", "Muestra de cine independiente", new BigDecimal("15.00"), 200);
+        EventoRequestDTO requestDTO = new EventoRequestDTO();
+        requestDTO.setNombre("Festival de Cine");
+        requestDTO.setDescripcion("Muestra de cine independiente");
+        requestDTO.setPrecio(new BigDecimal("15.00"));
+        requestDTO.setAforoDisponible(200);
         EventoResponseDTO responseDTO = new EventoResponseDTO(1L, "Festival de Cine", "Muestra de cine independiente", new BigDecimal("15.00"), 200);
 
         when(eventoService.crearEvento(any(EventoRequestDTO.class))).thenReturn(responseDTO);
