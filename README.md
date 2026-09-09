@@ -2,7 +2,9 @@
 
 Aplicación para gestionar eventos, compuesta por:
 
-- `eventhub-back-springboot`: API REST Spring Boot con JPA, Aurora PostgreSQL (usando las credenciales que Aurora almacena en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI.
+- `eventhub-ventas-springboot`: servicio de ventas. API REST Spring Boot con JPA, Aurora PostgreSQL (usando las credenciales que Aurora almacena en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI. Además coordina la compra llamando a los otros dos servicios.
+- `eventhub-pagos-springboot`: microservicio de cobros. Resuelve cada solicitud de cargo simulando una pasarela de pago.
+- `eventhub-correos-springboot`: microservicio de correos. Avisa al comprador por Amazon SES del resultado de su compra.
 - `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT.
 - `aws-scripts`: scripts para desplegar una instancia EC2, crear el clúster Aurora, configurar Nginx, crear Cognito y publicar el backend y el frontend.
 
@@ -47,10 +49,10 @@ make delete
 - `aws-scripts/callback-url.txt`: URL HTTPS a la que Cognito redirige tras el login.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
-- `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
-- `eventhub-back-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot.
+- `eventhub-ventas-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
+- `eventhub-ventas-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot.
 
-Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-back-springboot/src/main/resources/`.
+Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-ventas-springboot/src/main/resources/`.
 
 ## Credenciales de la base de datos
 
@@ -64,6 +66,42 @@ El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el 
 
 `make delete` elimina la instancia, el clúster y su subnet group; RDS se encarga de retirar el secreto.
 
+## Compra de una entrada
+
+La compra la coordina el servicio de ventas, que es el único publicado por Nginx. Los otros dos escuchan solo en `127.0.0.1`, así que únicamente se les puede llamar desde la propia máquina:
+
+1. Ventas comprueba el aforo del evento y, si queda, pide el cargo a pagos (`POST http://127.0.0.1:8081/api/pagos`).
+2. Pagos responde `APROBADO` o `DENEGADO` con una referencia. La denegación llega con un 200: es un resultado de negocio, no un error.
+3. Ventas guarda la compra marcada como `COBRO_OK` o `COBRO_NOK`. El aforo solo baja cuando el cobro se aprueba.
+4. Ventas encarga el aviso a correos (`POST http://127.0.0.1:8082/api/correos/confirmacion-compra`), que redacta el texto y lo envía por Amazon SES.
+
+Los dos microservicios pueden fallar sin tumbar la compra:
+
+- Si pagos no responde, ventas registra la compra como `COBRO_NOK` sin referencia de pago.
+- Si correos no responde, la compra ya está guardada y el fallo solo queda en el log.
+
+El comportamiento se ajusta desde las propiedades de cada servicio:
+
+- `pagos.probabilidad-fallo` (por defecto `0.2`): con qué frecuencia se deniega el cargo. Con `0.0` se aprueban todos.
+- `correos.remitente`: identidad verificada en SES desde la que sale el correo. Mientras la cuenta esté en el sandbox de SES, el destinatario también tiene que estar verificado.
+- `servicios.pagos.url` y `servicios.correos.url` en ventas: dónde buscar cada microservicio.
+
+## Ejecutar los microservicios localmente
+
+Cada servicio es un proyecto Maven independiente y se arranca por separado:
+
+```bash
+cd eventhub-pagos-springboot
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+```bash
+cd eventhub-correos-springboot
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+Con el perfil `dev` cada uno publica su Swagger en `http://localhost:8081/swagger-ui.html` y `http://localhost:8082/swagger-ui.html`. El de correos necesita credenciales de AWS válidas para que SES acepte el envío.
+
 ## La aplicación estará disponible en
 
 ### Front
@@ -75,7 +113,7 @@ https://<public-ip.txt>/
 Swagger no se publica en EC2. En local, arranca el backend con el perfil `dev`:
 
 ```bash
-cd eventhub-back-springboot
+cd eventhub-ventas-springboot
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 

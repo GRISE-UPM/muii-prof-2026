@@ -1,0 +1,54 @@
+# Compilación de Maven / Gradle
+target/
+build/
+out/
+.gradle/
+bin/
+
+# Bytecode y empaquetados
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# Tests: los escriben los alumnos, así que se quedan en local y no se suben.
+# El smoke test sí se versiona, porque comprueba que la aplicación arranca.
+src/test/java/**/*Test.java
+!src/test/java/**/*SmokeTest.java
+
+# Configuración generada por aws-scripts (cognito.sh, aurora.sh)
+src/main/resources/cognito.properties
+src/main/resources/aurora.properties
+
+# Maven wrapper descargado
+.mvn/wrapper/maven-wrapper.jar
+
+# Entornos
+.env
+.env.local
+
+# Editores e IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.factorypath
+*.swp
+*~
+
+# Logs y base de datos local (H2)
+*.log
+*.db
+*.mv.db
+*.trace.db
+*.lock.db
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
