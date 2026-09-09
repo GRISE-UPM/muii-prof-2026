@@ -22,12 +22,6 @@ public class PagoRequestDTO {
 
     public PagoRequestDTO() {}
 
-    public PagoRequestDTO(Long eventoId, String usuarioEmail, BigDecimal importe) {
-        this.eventoId = eventoId;
-        this.usuarioEmail = usuarioEmail;
-        this.importe = importe;
-    }
-
     public Long getEventoId() { return eventoId; }
     public void setEventoId(Long eventoId) { this.eventoId = eventoId; }
 

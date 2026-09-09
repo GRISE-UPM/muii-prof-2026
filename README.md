@@ -2,7 +2,7 @@
 
 Aplicación para gestionar eventos, compuesta por:
 
-- `eventhub-ventas-springboot`: servicio de ventas. API REST Spring Boot con JPA, Aurora PostgreSQL (usando las credenciales que Aurora almacena en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI. Además coordina la compra llamando a los otros dos servicios.
+- `eventhub-eventos-springboot`: servicio de eventos. API REST Spring Boot con JPA, Aurora PostgreSQL (usando las credenciales que Aurora almacena en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI. Además coordina la compra llamando a los otros dos servicios.
 - `eventhub-pagos-springboot`: microservicio de cobros. Resuelve cada solicitud de cargo simulando una pasarela de pago.
 - `eventhub-correos-springboot`: microservicio de correos. Avisa al comprador por Amazon SES del resultado de su compra.
 - `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT.
@@ -49,10 +49,10 @@ make delete
 - `aws-scripts/callback-url.txt`: URL HTTPS a la que Cognito redirige tras el login.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
-- `eventhub-ventas-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
-- `eventhub-ventas-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot.
+- `eventhub-eventos-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
+- `eventhub-eventos-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot.
 
-Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-ventas-springboot/src/main/resources/`.
+Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-eventos-springboot/src/main/resources/`.
 
 ## Credenciales de la base de datos
 
@@ -68,23 +68,23 @@ El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el 
 
 ## Compra de una entrada
 
-La compra la coordina el servicio de ventas, que es el único publicado por Nginx. Los otros dos escuchan solo en `127.0.0.1`, así que únicamente se les puede llamar desde la propia máquina:
+La compra la coordina el servicio de eventos, que es el único publicado por Nginx. Los otros dos escuchan solo en `127.0.0.1`, así que únicamente se les puede llamar desde la propia máquina:
 
-1. Ventas comprueba el aforo del evento y, si queda, pide el cargo a pagos (`POST http://127.0.0.1:8081/api/pagos`).
+1. Eventos comprueba el aforo del evento y, si queda, pide el cargo a pagos (`POST http://127.0.0.1:8081/api/pagos`).
 2. Pagos responde `APROBADO` o `DENEGADO` con una referencia. La denegación llega con un 200: es un resultado de negocio, no un error.
-3. Ventas guarda la compra marcada como `COBRO_OK` o `COBRO_NOK`. El aforo solo baja cuando el cobro se aprueba.
-4. Ventas encarga el aviso a correos (`POST http://127.0.0.1:8082/api/correos/confirmacion-compra`), que redacta el texto y lo envía por Amazon SES.
+3. Eventos guarda la compra marcada como `COBRO_OK` o `COBRO_NOK`. El aforo solo baja cuando el cobro se aprueba.
+4. Eventos encarga el aviso a correos (`POST http://127.0.0.1:8082/api/correos/confirmacion-compra`), que redacta el texto y lo envía por Amazon SES.
 
 Los dos microservicios pueden fallar sin tumbar la compra:
 
-- Si pagos no responde, ventas registra la compra como `COBRO_NOK` sin referencia de pago.
-- Si correos no responde, la compra ya está guardada y el fallo solo queda en el log.
+- Si pagos no responde, eventos registra la compra como `COBRO_NOK` sin referencia de pago.
+- Si correos no responde, la compra ya está guardada y el fallo se ignora.
 
 El comportamiento se ajusta desde las propiedades de cada servicio:
 
 - `pagos.probabilidad-fallo` (por defecto `0.2`): con qué frecuencia se deniega el cargo. Con `0.0` se aprueban todos.
 - `correos.remitente`: identidad verificada en SES desde la que sale el correo. Mientras la cuenta esté en el sandbox de SES, el destinatario también tiene que estar verificado.
-- `servicios.pagos.url` y `servicios.correos.url` en ventas: dónde buscar cada microservicio.
+- `servicios.pagos.url` y `servicios.correos.url` en eventos: dónde buscar cada microservicio.
 
 ## Ejecutar los microservicios localmente
 
@@ -113,7 +113,7 @@ https://<public-ip.txt>/
 Swagger no se publica en EC2. En local, arranca el backend con el perfil `dev`:
 
 ```bash
-cd eventhub-ventas-springboot
+cd eventhub-eventos-springboot
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 

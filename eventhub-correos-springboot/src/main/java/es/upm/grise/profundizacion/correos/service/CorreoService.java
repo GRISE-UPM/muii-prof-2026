@@ -3,8 +3,6 @@ package es.upm.grise.profundizacion.correos.service;
 import es.upm.grise.profundizacion.correos.dto.ConfirmacionCompraRequestDTO;
 import es.upm.grise.profundizacion.correos.dto.CorreoResponseDTO;
 import es.upm.grise.profundizacion.correos.model.ResultadoCobro;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailSender;
 import org.springframework.mail.SimpleMailMessage;
@@ -18,8 +16,6 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class CorreoService {
-
-    private static final Logger log = LoggerFactory.getLogger(CorreoService.class);
 
     private final MailSender mailSender;
     private final String remitente;
@@ -40,7 +36,6 @@ public class CorreoService {
         mensaje.setText(redactarCuerpo(dto, cobrado));
 
         mailSender.send(mensaje);
-        log.info("Correo enviado a {} con asunto '{}'", dto.getDestinatario(), asunto);
 
         return new CorreoResponseDTO(dto.getDestinatario(), asunto);
     }

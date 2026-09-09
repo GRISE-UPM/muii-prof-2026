@@ -10,10 +10,10 @@
         <relativePath/>
     </parent>
     <groupId>es.upm.grise.profundizacion</groupId>
-    <artifactId>eventhub</artifactId>
+    <artifactId>eventhub-eventos</artifactId>
     <version>5.0.0</version>
-    <name>eventhub</name>
-    <description>Proyecto Spring Boot para gestión de eventos</description>
+    <name>eventhub-eventos</name>
+    <description>Servicio de eventos de Event Hub</description>
 
     <properties>
         <java.version>21</java.version>

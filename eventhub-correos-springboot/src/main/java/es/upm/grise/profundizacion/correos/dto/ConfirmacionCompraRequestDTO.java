@@ -26,15 +26,6 @@ public class ConfirmacionCompraRequestDTO {
 
     public ConfirmacionCompraRequestDTO() {}
 
-    public ConfirmacionCompraRequestDTO(String destinatario, String evento, BigDecimal importe,
-                                        ResultadoCobro resultadoCobro, String referenciaPago) {
-        this.destinatario = destinatario;
-        this.evento = evento;
-        this.importe = importe;
-        this.resultadoCobro = resultadoCobro;
-        this.referenciaPago = referenciaPago;
-    }
-
     public String getDestinatario() { return destinatario; }
     public void setDestinatario(String destinatario) { this.destinatario = destinatario; }
 

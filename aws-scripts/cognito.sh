@@ -8,7 +8,7 @@ POOL_NAME="eventhub-pool"
 CLIENT_NAME="eventhub-front-react"
 CALLBACK_URL_FILE="$SCRIPT_DIR/callback-url.txt"
 CONFIG_FILE="$PROJECT_ROOT/eventhub-front-react/.env.local"
-SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-ventas-springboot/src/main/resources/cognito.properties"
+SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-eventos-springboot/src/main/resources/cognito.properties"
 AWS_REGION="us-east-1"
 # Cognito no admite el scope OIDC 'offline_access'; el refresh token se emite
 # con el flujo authorization code si el client tiene RefreshTokenValidity > 0.

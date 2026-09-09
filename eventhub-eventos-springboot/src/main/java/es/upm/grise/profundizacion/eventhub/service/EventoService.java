@@ -11,8 +11,6 @@ import es.upm.grise.profundizacion.eventhub.dto.EventoResponseDTO;
 import es.upm.grise.profundizacion.eventhub.model.EstadoCobro;
 import es.upm.grise.profundizacion.eventhub.model.Evento;
 import es.upm.grise.profundizacion.eventhub.repository.EventoRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +26,6 @@ import java.util.stream.Collectors;
  */
 @Service
 public class EventoService {
-
-    private static final Logger log = LoggerFactory.getLogger(EventoService.class);
 
     private final EventoRepository eventoRepository;
     private final CompraService compraService;
@@ -108,20 +104,19 @@ public class EventoService {
         try {
             return pagoClient.cobrar(new PagoRequest(eventoId, usuarioEmail, importe));
         } catch (RestClientException ex) {
-            log.error("El microservicio de pagos no respondió para el evento {}: {}", eventoId, ex.getMessage());
             return new PagoResponse(null, "DENEGADO", "El servicio de pagos no está disponible");
         }
     }
 
     /**
-     * El correo es el último paso y no puede tumbar la compra: si falla, se registra en el log
+     * El correo es el último paso y no puede tumbar la compra: si falla, se ignora
      * y la respuesta al usuario sigue reflejando lo que se guardó en base de datos.
      */
     private void avisarAlComprador(ConfirmacionCompraRequest peticion) {
         try {
             correoClient.enviarConfirmacionCompra(peticion);
-        } catch (RestClientException ex) {
-            log.error("No se pudo enviar el correo a {}: {}", peticion.getDestinatario(), ex.getMessage());
+        } catch (RestClientException ignored) {
+            // El fallo del correo no debe invalidar una compra ya registrada.
         }
     }
 

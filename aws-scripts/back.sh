@@ -4,7 +4,7 @@
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
-BACKEND_PATH="$PROJECT_ROOT/eventhub-ventas-springboot"
+BACKEND_PATH="$PROJECT_ROOT/eventhub-eventos-springboot"
 PUBLIC_IP_FILE="$PROJECT_ROOT/aws-scripts/public-ip.txt"
 
 # Función para mostrar la ayuda
