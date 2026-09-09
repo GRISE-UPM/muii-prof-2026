@@ -22,13 +22,6 @@ public class EventoRequestDTO {
 
     public EventoRequestDTO() {}
 
-    public EventoRequestDTO(String nombre, String descripcion, BigDecimal precio, Integer aforoDisponible) {
-        this.nombre = nombre;
-        this.descripcion = descripcion;
-        this.precio = precio;
-        this.aforoDisponible = aforoDisponible;
-    }
-
     public String getNombre() { return nombre; }
     public void setNombre(String nombre) { this.nombre = nombre; }
 
