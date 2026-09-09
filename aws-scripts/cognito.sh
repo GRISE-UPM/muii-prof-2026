@@ -136,6 +136,10 @@ case "$ACTION" in
                 --region "$AWS_REGION" \
                 --domain "$COGNITO_DOMAIN" \
                 --user-pool-id "$USER_POOL_ID"
+            if [ $? -ne 0 ]; then
+                echo "Error al crear el dominio de Cognito '$COGNITO_DOMAIN'."
+                exit 1
+            fi
         fi
 
         # Localiza el App Client de la SPA dentro del User Pool
@@ -208,6 +212,10 @@ case "$ACTION" in
                 --refresh-token-validity "$REFRESH_TOKEN_VALIDITY_DAYS" \
                 --query "UserPoolClient.ClientId" \
                 --output text >/dev/null
+            if [ $? -ne 0 ]; then
+                echo "Error al actualizar el App Client '$CLIENT_NAME'."
+                exit 1
+            fi
         fi
 
         if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
@@ -230,12 +238,20 @@ VITE_COGNITO_ISSUER_URI=$ISSUER_URI
 VITE_COGNITO_CLIENT_ID=$CLIENT_ID
 VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN_URL
 EOF
+        if [ $? -ne 0 ]; then
+            echo "Error al escribir la configuración del frontend: $CONFIG_FILE"
+            exit 1
+        fi
 
         cat > "$SPRING_CONFIG_FILE" <<EOF
 # Generado por aws-scripts/cognito.sh. No editar a mano: se sobrescribe en cada create.
 # spring.security.oauth2.resourceserver.jwt.issuer-uri: emisor de los JWT (User Pool)
 spring.security.oauth2.resourceserver.jwt.issuer-uri=$ISSUER_URI
 EOF
+        if [ $? -ne 0 ]; then
+            echo "Error al escribir la configuración de Spring Boot: $SPRING_CONFIG_FILE"
+            exit 1
+        fi
 
         echo "Archivo $CONFIG_FILE actualizado."
         echo "Archivo $SPRING_CONFIG_FILE actualizado."
