@@ -4,6 +4,9 @@
 # H2 es embebida: no hay host ni puerto que guardar en el secreto.
 SECRET_NAME="prod/h2/admin"
 
+# El nombre del administrador depende de la base de datos.
+# En H2 el nombre puede ser cualquiera (aqui, admin).
+# En PostgreSQL/Aurora (V4.0.0) el usuario master es obligatorio (no puede llamarse admin).
 DB_USER="admin"
 DB_NAME="eventhub"
 
