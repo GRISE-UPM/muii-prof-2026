@@ -12,7 +12,7 @@ DB_INSTANCE_ID="eventhub-aurora-instance"
 DB_SUBNET_GROUP="eventhub-aurora-subnets"
 SG_ID_FILE="$SCRIPT_DIR/sg-id.txt"
 SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-back-springboot/src/main/resources/aurora.properties"
-DB_USER="postgres"
+DB_USER="master"
 DB_NAME="eventhub"
 DB_ENGINE="aurora-postgresql"
 DB_PORT=5432
@@ -122,7 +122,7 @@ case "$ACTION" in
             # Parámetros:
             # --db-cluster-identifier: Nombre elegido por este script (db-cluster-id.txt)
             # --engine: aurora-postgresql
-            # --master-username: Usuario master (no puede ser 'admin' en PostgreSQL)
+            # --master-username: Usuario master (en Aurora PostgreSQL no puede ser 'admin')
             # --manage-master-user-password: Aurora crea el secreto y la password; no viaja por la CLI
             # --database-name: Base inicial (coincide con dbname del secreto cuando RDS lo rellena)
             # --vpc-security-group-ids: Mismo SG que la instancia EC2
