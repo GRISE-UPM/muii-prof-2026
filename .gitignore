@@ -5,8 +5,9 @@ ssh-key/
 *.ppk
 *.key
 
-# Ficheros generados por aws-scripts (public-ip.txt)
+# Ficheros generados por aws-scripts
 aws-scripts/*.txt
+aws-scripts/lab-state.json
 
 # Temporales que crean los scripts de despliegue
 aws-scripts/nginx-config-file.sh

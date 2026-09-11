@@ -3,9 +3,10 @@
 # Configuración del despliegue del backend Spring Boot
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=jq-functions.sh
+source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 BACKEND_PATH="$PROJECT_ROOT/eventhub-back-springboot"
-PUBLIC_IP_FILE="$PROJECT_ROOT/aws-scripts/public-ip.txt"
 
 # Función para mostrar la ayuda
 usage() {
@@ -26,12 +27,8 @@ ACTION="$1"
 
 case "$ACTION" in
     deploy)
-        if [ ! -f "$PUBLIC_IP_FILE" ]; then
-            echo "Error: No se encontró el archivo de la IP en: $PUBLIC_IP_FILE"
-            exit 1
-        fi
-
-        PUBLIC_IP=$(< "$PUBLIC_IP_FILE")
+        # PublicIp: comodidad en lab-state; tambien se obtiene desde AllocationId.
+        PUBLIC_IP=$(state_require PublicIp)
 
         if [ ! -f "$KEY_PATH" ]; then
             echo "Error: No se encontró la clave SSH en: $KEY_PATH"
@@ -103,13 +100,7 @@ END_BACKEND
         ;;
 
     delete)
-        if [ ! -f "$PUBLIC_IP_FILE" ]; then
-            echo "Error: No se encontró el archivo de la IP en: $PUBLIC_IP_FILE"
-            exit 1
-        fi
-
-        PUBLIC_IP=$(< "$PUBLIC_IP_FILE")
-        PUBLIC_IP="${PUBLIC_IP%%$'\n'}"
+        PUBLIC_IP=$(state_require PublicIp)
 
         if [ ! -f "$KEY_PATH" ]; then
             echo "Error: No se encontró la clave SSH en: $KEY_PATH"
