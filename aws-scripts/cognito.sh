@@ -6,13 +6,12 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/jq-functions.sh"
 
 # Configuración por defecto (constantes; no van en lab-state.json).
-# UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri y CognitoDomainUrl
+# Region, UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri y CognitoDomainUrl
 # se escriben en lab-state.json al hacer create.
 POOL_NAME="eventhub-pool"
 CLIENT_NAME="eventhub-front-react"
 CONFIG_FILE="$PROJECT_ROOT/eventhub-front-react/.env.local"
 SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-back-springboot/src/main/resources/cognito.properties"
-AWS_REGION="us-east-1"
 # Cognito no admite el scope OIDC 'offline_access'; el refresh token se emite
 # con el flujo authorization code si el client tiene RefreshTokenValidity > 0.
 OAUTH_SCOPES="openid email profile"
@@ -29,6 +28,14 @@ if [ -z "$1" ] || [ -n "$2" ]; then
 fi
 
 ACTION="$1"
+
+# Región de la CLI / entorno (Academy suele ser us-east-1); hace falta para las URLs de Cognito.
+AWS_REGION=$(aws configure get region 2>/dev/null || true)
+AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
+if [ -z "$AWS_REGION" ]; then
+    echo "Error: No hay región AWS configurada (aws configure get region / AWS_DEFAULT_REGION)."
+    exit 1
+fi
 
 # El prefijo del Hosted UI es único en toda la región, no solo en esta cuenta.
 # Se añade el ID de cuenta para que no choque entre alumnos o laboratorios.
@@ -70,7 +77,6 @@ case "$ACTION" in
         # --query: Extrae el User Pool ligado a ese prefijo
         # --output: Devuelve el resultado en texto plano
         DOMAIN_POOL=$(aws cognito-idp describe-user-pool-domain \
-            --region "$AWS_REGION" \
             --domain "$COGNITO_DOMAIN" \
             --query "DomainDescription.UserPoolId" \
             --output text 2>/dev/null || true)
@@ -85,7 +91,6 @@ case "$ACTION" in
             # --query: Filtra la lista buscando el elemento con el nombre especificado y obtiene su ID
             # --output: Devuelve el resultado filtrado como texto plano
             USER_POOL_ID=$(aws cognito-idp list-user-pools \
-                --region "$AWS_REGION" \
                 --max-results 60 \
                 --query "UserPools[?Name=='$POOL_NAME'].Id | [0]" \
                 --output text)
@@ -104,7 +109,6 @@ case "$ACTION" in
                 # --query: Extrae unicamente el valor del campo "Id" de la respuesta JSON
                 # --output: Devuelve el resultado en texto plano sin comillas para asignarlo a la variable
                 USER_POOL_ID=$(aws cognito-idp create-user-pool \
-                    --region "$AWS_REGION" \
                     --pool-name "$POOL_NAME" \
                     --auto-verified-attributes email \
                     --username-attributes email \
@@ -127,7 +131,6 @@ case "$ACTION" in
             #           página web de login adecuada
             # --user-pool-id: ID del User Pool al que se asocia el dominio
             aws cognito-idp create-user-pool-domain \
-                --region "$AWS_REGION" \
                 --domain "$COGNITO_DOMAIN" \
                 --user-pool-id "$USER_POOL_ID"
             if [ $? -ne 0 ]; then
@@ -143,7 +146,6 @@ case "$ACTION" in
         # --query: Extrae el ClientId del cliente cuyo nombre coincide con CLIENT_NAME
         # --output: Devuelve el resultado filtrado como texto plano
         CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
-            --region "$AWS_REGION" \
             --user-pool-id "$USER_POOL_ID" \
             --max-results 60 \
             --query "UserPoolClients[?ClientName=='$CLIENT_NAME'].ClientId | [0]" \
@@ -165,7 +167,6 @@ case "$ACTION" in
             # --query: Extrae unicamente la propiedad "ClientId" de la respuesta JSON
             # --output: Devuelve la salida como texto plano
             CLIENT_ID=$(aws cognito-idp create-user-pool-client \
-                --region "$AWS_REGION" \
                 --user-pool-id "$USER_POOL_ID" \
                 --client-name "$CLIENT_NAME" \
                 --no-generate-secret \
@@ -193,7 +194,6 @@ case "$ACTION" in
             # --supported-identity-providers: Permite autenticacion con el directorio propio de Cognito
             # --refresh-token-validity: Dias de validez del refresh token (Cognito no usa el scope offline_access)
             aws cognito-idp update-user-pool-client \
-                --region "$AWS_REGION" \
                 --user-pool-id "$USER_POOL_ID" \
                 --client-id "$CLIENT_ID" \
                 --client-name "$CLIENT_NAME" \
@@ -223,13 +223,14 @@ case "$ACTION" in
         ISSUER_URI="https://cognito-idp.$AWS_REGION.amazonaws.com/$USER_POOL_ID"
 
         # IDs y URLs de Cognito en lab-state.json (POOL_NAME / CLIENT_NAME siguen siendo constantes).
+        state_set Region "$AWS_REGION"
         state_set UserPoolId "$USER_POOL_ID"
         state_set ClientId "$CLIENT_ID"
         state_set Domain "$COGNITO_DOMAIN"
         state_set CallbackUrl "$CALLBACK_URL"
         state_set IssuerUri "$ISSUER_URI"
         state_set CognitoDomainUrl "$COGNITO_DOMAIN_URL"
-        echo "Cognito guardado en lab-state.json: UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri, CognitoDomainUrl"
+        echo "Cognito guardado en lab-state.json: Region, UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri, CognitoDomainUrl"
 
         cat > "$CONFIG_FILE" <<EOF
 # .env.local (sufijo .local): git lo ignora. Lo genera aws-scripts/cognito.sh en cada create;
@@ -272,7 +273,6 @@ EOF
         # --query: Extrae el User Pool ligado a ese dominio
         # --output: Devuelve el resultado en texto plano
         DOMAIN_POOL=$(aws cognito-idp describe-user-pool-domain \
-            --region "$AWS_REGION" \
             --domain "$COGNITO_DOMAIN" \
             --query "DomainDescription.UserPoolId" \
             --output text 2>/dev/null || true)
@@ -287,7 +287,6 @@ EOF
         # --query: Filtra la lista buscando el elemento con el nombre especificado y obtiene su ID
         # --output: Devuelve el resultado filtrado como texto plano
         USER_POOL_ID=$(aws cognito-idp list-user-pools \
-            --region "$AWS_REGION" \
             --max-results 60 \
             --query "UserPools[?Name=='$POOL_NAME'].Id | [0]" \
             --output text)
