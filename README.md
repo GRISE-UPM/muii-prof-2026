@@ -43,7 +43,7 @@ make delete
 
 ## Los scripts generan o actualizan estos ficheros:
 
-- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, VpcId, SubnetIds, InstanceId, AllocationId, PublicIp, UserPoolId, ClientId, Domain, CallbackUrl, …). Lo escriben los scripts de create; no versionar.
+- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, VpcId, SubnetIds, InstanceId, AllocationId, PublicIp, Region, UserPoolId, ClientId, Domain, CallbackUrl, …). Lo escriben los scripts de create; no versionar.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
 - `eventhub-eventos-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
