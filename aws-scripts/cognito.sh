@@ -5,7 +5,9 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
-# Configuración por defecto (constantes; no van en lab-state.json)
+# Configuración por defecto (constantes; no van en lab-state.json).
+# UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri y CognitoDomainUrl
+# se escriben en lab-state.json al hacer create.
 POOL_NAME="eventhub-pool"
 CLIENT_NAME="eventhub-front-react"
 CONFIG_FILE="$PROJECT_ROOT/eventhub-front-react/.env.local"
@@ -219,6 +221,15 @@ case "$ACTION" in
         # el primero inicia la autorización y el segundo identifica al emisor de los JWT.
         COGNITO_DOMAIN_URL="https://$COGNITO_DOMAIN.auth.$AWS_REGION.amazoncognito.com"
         ISSUER_URI="https://cognito-idp.$AWS_REGION.amazonaws.com/$USER_POOL_ID"
+
+        # IDs y URLs de Cognito en lab-state.json (POOL_NAME / CLIENT_NAME siguen siendo constantes).
+        state_set UserPoolId "$USER_POOL_ID"
+        state_set ClientId "$CLIENT_ID"
+        state_set Domain "$COGNITO_DOMAIN"
+        state_set CallbackUrl "$CALLBACK_URL"
+        state_set IssuerUri "$ISSUER_URI"
+        state_set CognitoDomainUrl "$COGNITO_DOMAIN_URL"
+        echo "Cognito guardado en lab-state.json: UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri, CognitoDomainUrl"
 
         cat > "$CONFIG_FILE" <<EOF
 # .env.local (sufijo .local): git lo ignora. Lo genera aws-scripts/cognito.sh en cada create;
