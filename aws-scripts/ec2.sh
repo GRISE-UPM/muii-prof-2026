@@ -30,34 +30,21 @@ case "$ACTION" in
     create)
         echo "Creando la infraestructura EC2."
 
-        # Creación del grupo de seguridad
-        echo "Creando Grupo de Seguridad."
+        # VPC por defecto de la cuenta (AWS Academy); independiente del security group.
         # Parámetros:
-        # --group-name: Nombre del security group que se creara en AWS
-        # --description: Texto descriptivo visible en la consola de EC2
-        # --query: Extrae unicamente el valor del campo "GroupId" de la respuesta JSON
-        # --output: Devuelve el resultado en texto plano sin comillas para asignarlo a la variable
-        SG_ID=$(aws ec2 create-security-group \
-            --group-name "$SG_NAME" \
-            --description "Permite trafico HTTP, HTTPS y SSH al servidor EC2" \
-            --query "GroupId" \
-            --output text)
-
-        if [ -z "$SG_ID" ]; then
-            echo "Error al crear el Grupo de Seguridad."
-            exit 1
-        fi
-        state_set GroupId "$SG_ID"
-        # VpcId del SG (VPC por defecto en AWS Academy); lo reutilizan scripts posteriores.
-        VPC_ID=$(aws ec2 describe-security-groups \
-            --group-ids "$SG_ID" \
-            --query 'SecurityGroups[0].VpcId' \
+        # --filters: VPC marcada como default
+        # --query: Extrae el VpcId
+        echo "Obteniendo la VPC por defecto..."
+        VPC_ID=$(aws ec2 describe-vpcs \
+            --filters Name=isDefault,Values=true \
+            --query 'Vpcs[0].VpcId' \
             --output text)
         if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
-            echo "Error: No se pudo obtener el VpcId del Grupo de Seguridad $SG_ID."
+            echo "Error: No se encontró una VPC por defecto."
             exit 1
         fi
         state_set VpcId "$VPC_ID"
+        echo "VpcId guardado en lab-state.json: $VPC_ID"
 
         # Subnets de la VPC: se listan todas y se guardan solo las DOS primeras
         # (Aurora exige >= 2 AZ en el DB subnet group).
@@ -79,6 +66,27 @@ case "$ACTION" in
         state_set_array SubnetIds "$SUBNET_1" "$SUBNET_2"
         echo "SubnetIds guardadas en lab-state.json: $SUBNET_1 $SUBNET_2"
 
+        # Creación del grupo de seguridad en esa VPC
+        echo "Creando Grupo de Seguridad."
+        # Parámetros:
+        # --group-name: Nombre del security group que se creara en AWS
+        # --description: Texto descriptivo visible en la consola de EC2
+        # --vpc-id: VPC donde vive el SG (la por defecto, ya en lab-state)
+        # --query: Extrae unicamente el valor del campo "GroupId" de la respuesta JSON
+        # --output: Devuelve el resultado en texto plano sin comillas para asignarlo a la variable
+        SG_ID=$(aws ec2 create-security-group \
+            --group-name "$SG_NAME" \
+            --description "Permite trafico HTTP, HTTPS y SSH al servidor EC2" \
+            --vpc-id "$VPC_ID" \
+            --query "GroupId" \
+            --output text)
+
+        if [ -z "$SG_ID" ]; then
+            echo "Error al crear el Grupo de Seguridad."
+            exit 1
+        fi
+        state_set GroupId "$SG_ID"
+        echo "GroupId guardado en lab-state.json: $SG_ID ($SG_NAME)"
 
         # Regla HTTP (Puerto 80)
         # Parámetros:
