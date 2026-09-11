@@ -267,6 +267,8 @@ EOF
         # usuarios registrados y perderlos no es recuperable. El prefijo del Hosted UI
         # es único en toda la región; si se elimina, puede quedar reservado un tiempo
         # o seguir ocupado en otra cuenta del Learner Lab y no se puede volver a crear.
+        # Sí se borran los ficheros locales generados (cognito.properties, .env.local):
+        # el siguiente create los regenera, reutilizando el pool si sigue existiendo.
         echo "Comprobando el dominio de Cognito '$COGNITO_DOMAIN'..."
         # Parámetros:
         # --domain: Prefijo del dominio Hosted UI
@@ -297,8 +299,13 @@ EOF
 
         if { [ -z "$DOMAIN_POOL" ] || [ "$DOMAIN_POOL" = "None" ]; } && \
            { [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" = "None" ]; }; then
-            echo "No hay dominio ni User Pool que eliminar."
+            echo "No hay dominio ni User Pool en AWS."
         fi
+
+        rm -f "$CONFIG_FILE" "$SPRING_CONFIG_FILE"
+        echo "Eliminados ficheros locales de Cognito (si existían):"
+        echo "  $CONFIG_FILE"
+        echo "  $SPRING_CONFIG_FILE"
         ;;
 
     *)

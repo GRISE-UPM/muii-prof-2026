@@ -35,7 +35,7 @@ Aplicación para gestionar eventos, compuesta por:
 make deploy
 ```
 
-desde la raíz para crear EC2, crear el clúster Aurora, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. La creación de Aurora tarda varios minutos. Cognito no se borra: si el User Pool o el dominio ya existen, se reutilizan. Para eliminar frontend, backend, Aurora, EC2 y los ficheros de la instancia:
+desde la raíz para crear EC2, crear el clúster Aurora, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. La creación de Aurora tarda varios minutos. Cognito en AWS no se borra: si el User Pool o el dominio ya existen, se reutilizan. `make delete` sí elimina los ficheros locales generados (`.env.local`, `cognito.properties`, etc.); el siguiente `create` los regenera. Para eliminar frontend, backend, configuración local de Cognito, Aurora, EC2 y los ficheros de la instancia:
 
 ```bash
 make delete
