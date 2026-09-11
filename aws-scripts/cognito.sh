@@ -2,11 +2,12 @@
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=jq-functions.sh
+source "$SCRIPT_DIR/jq-functions.sh"
 
-# Configuración por defecto
+# Configuración por defecto (constantes; no van en lab-state.json)
 POOL_NAME="eventhub-pool"
 CLIENT_NAME="eventhub-front-react"
-CALLBACK_URL_FILE="$SCRIPT_DIR/callback-url.txt"
 CONFIG_FILE="$PROJECT_ROOT/eventhub-front-react/.env.local"
 SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-back-springboot/src/main/resources/cognito.properties"
 AWS_REGION="us-east-1"
@@ -51,18 +52,10 @@ case "$ACTION" in
             exit 1
         fi
 
-        # Usa callback-url.txt (escrito por ec2.sh) como redirect_uri de Cognito
-        if [ ! -f "$CALLBACK_URL_FILE" ]; then
-            echo "Error: No se encontró la URL de callback de Cognito: $CALLBACK_URL_FILE"
-            exit 1
-        fi
-
-        CALLBACK_URL=$(< "$CALLBACK_URL_FILE")
-        CALLBACK_URL="${CALLBACK_URL%%$'\n'}"
-        if [ -z "$CALLBACK_URL" ]; then
-            echo "Error: El archivo '$CALLBACK_URL_FILE' está vacío."
-            exit 1
-        fi
+        # Callback HTTPS de la SPA: se deriva de PublicIp (lab-state.json / EC2).
+        # Tambien se podria reconstruir con describe-addresses --allocation-ids.
+        PUBLIC_IP=$(state_require PublicIp)
+        CALLBACK_URL="https://${PUBLIC_IP}"
 
         echo "Callback de Cognito: $CALLBACK_URL"
         echo "Dominio de Cognito: $COGNITO_DOMAIN"

@@ -41,8 +41,7 @@ make delete
 
 ## Los scripts generan o actualizan estos ficheros:
 
-- `aws-scripts/public-ip.txt`: IP pública de la instancia EC2.
-- `aws-scripts/callback-url.txt`: URL HTTPS a la que Cognito redirige tras el login.
+- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, InstanceId, AllocationId, PublicIp, …). Lo escriben los scripts de create; no versionar.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
 - `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
@@ -53,7 +52,7 @@ Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` fall
 
 ### Front
 
-https://<public-ip.txt>/
+https://<PublicIp de lab-state.json>/
 
 ### Documentación OpenAPI (solo desarrollo)
 

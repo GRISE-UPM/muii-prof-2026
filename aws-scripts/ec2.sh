@@ -1,13 +1,13 @@
-#!/bin/bash -x
+#!/bin/bash
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+# shellcheck source=jq-functions.sh
+source "$SCRIPT_DIR/jq-functions.sh"
 
-# Configuración por defecto
+# Configuración por defecto (constantes del laboratorio; no van en lab-state.json)
 SG_NAME="eventhub-sg"
 KEY_NAME="vockey"
 INSTANCE_TYPE="t2.micro"
-PUBLIC_IP_FILE="$SCRIPT_DIR/public-ip.txt"
-COGNITO_CALLBACK_URL_FILE="$SCRIPT_DIR/callback-url.txt"
 
 # Funcion para mostrar la ayuda
 usage() {
@@ -47,6 +47,7 @@ case "$ACTION" in
             echo "Error al crear el Grupo de Seguridad."
             exit 1
         fi
+        state_set GroupId "$SG_ID"
 
         # Regla HTTP (Puerto 80)
         # Parámetros:
@@ -104,7 +105,8 @@ case "$ACTION" in
             --security-group-ids "$SG_ID" \
             --query "Instances[0].InstanceId" \
             --output text)
-        
+        state_set InstanceId "$INSTANCE_ID"
+
         # Reserva de una IP estática (Elastic IP)
         echo "Reservando Elastic IP..."
         # Parámetros:
@@ -115,6 +117,7 @@ case "$ACTION" in
             --domain vpc \
             --query "AllocationId" \
             --output text)
+        state_set AllocationId "$ALLOCATION_ID"
 
         echo "Esperando que la instancia cambie a estado running..."
         # Parámetros:
@@ -126,109 +129,75 @@ case "$ACTION" in
         # Parámetros:
         # --instance-id: Instancia a la que se liga la Elastic IP
         # --allocation-id: Reserva de IP publica obtenida en el paso anterior
-        aws ec2 associate-address \
+        # --query: AssociationId para poder desasociar en delete sin consultar AWS
+        ASSOCIATION_ID=$(aws ec2 associate-address \
             --instance-id "$INSTANCE_ID" \
-            --allocation-id "$ALLOCATION_ID"
+            --allocation-id "$ALLOCATION_ID" \
+            --query "AssociationId" \
+            --output text)
+        state_set AssociationId "$ASSOCIATION_ID"
 
         # Parámetros:
         # --allocation-ids: Identificador de la Elastic IP cuya direccion se consulta
         # --query: Extrae la direccion IPv4 publica
         # --output: Devuelve el resultado en texto plano
+        # PublicIp: comodidad para nginx/back/front; tambien se obtiene con
+        # describe-addresses --allocation-ids (AllocationId).
         PUBLIC_IP=$(aws ec2 describe-addresses \
             --allocation-ids "$ALLOCATION_ID" \
             --query "Addresses[0].PublicIp" \
             --output text)
+        state_set PublicIp "$PUBLIC_IP"
 
         echo "Instancia activa en la IP fija: $PUBLIC_IP"
+        echo "Estado del laboratorio: $LAB_STATE_FILE"
         echo "Esperando 45 segundos para completar la inicializacion"
         sleep 45
-
-        # Guardar la IP para la instalación del frontend y backend
-        echo "$PUBLIC_IP" > $PUBLIC_IP_FILE
-
-        # URL HTTPS a la que Cognito redirige tras el login (redirect_uri de la SPA)
-        echo "https://$PUBLIC_IP" > "$COGNITO_CALLBACK_URL_FILE"
 
         echo "Creación de instancia EC2 finalizada."
         ;;
 
     delete)
-        echo "Buscando recursos asociados al Grupo de Seguridad '$SG_NAME'..."
+        echo "Eliminando infraestructura EC2 segun $LAB_STATE_FILE..."
 
-        # Consultar ID del Grupo de Seguridad por nombre
-        # Parámetros:
-        # --group-names: Nombre del security group que se busca en la cuenta
-        # --query: Extrae el GroupId del primer resultado
-        # --output: Devuelve el resultado en texto plano
-        SG_ID=$(aws ec2 describe-security-groups \
-            --group-names "$SG_NAME" \
-            --query "SecurityGroups[0].GroupId" \
-            --output text 2>/dev/null)
+        INSTANCE_ID=$(state_get InstanceId)
+        ALLOCATION_ID=$(state_get AllocationId)
+        ASSOCIATION_ID=$(state_get AssociationId)
+        SG_ID=$(state_get GroupId)
 
-        if [ -z "$SG_ID" ] || [ "$SG_ID" == "None" ]; then
-            echo "No se encontro el Grupo de Seguridad '$SG_NAME' en AWS."
-            exit 1
+        if [ -n "$ASSOCIATION_ID" ]; then
+            echo "Desasociando Elastic IP (AssociationId=$ASSOCIATION_ID)..."
+            aws ec2 disassociate-address --association-id "$ASSOCIATION_ID" 2>/dev/null || true
         fi
 
-        # Buscar Instancias asociadas a este SG
-        # Parámetros:
-        # --filters: Restringe a instancias de este SG que no esten ya terminadas
-        # --query: Extrae los InstanceId encontrados
-        # --output: Devuelve el resultado en texto plano
-        INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=instance.group-id,Values=$SG_ID" "Name=instance-state-name,Values=running,pending,stopped,stopping" \
-            --query "Reservations[*].Instances[0].InstanceId" \
-            --output text)
+        if [ -n "$ALLOCATION_ID" ]; then
+            echo "Liberando Elastic IP (AllocationId=$ALLOCATION_ID)..."
+            aws ec2 release-address --allocation-id "$ALLOCATION_ID" 2>/dev/null || true
+        fi
 
-        if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "None" ]; then
-            echo "Instancia encontrada: $INSTANCE_ID"
-
-            # Buscar y liberar Elastic IP asociada
-            # Parámetros:
-            # --filters: Localiza la Elastic IP ligada a la instancia
-            # --query: Extrae el AllocationId para poder liberarla
-            # --output: Devuelve el resultado en texto plano
-            ALLOCATION_ID=$(aws ec2 describe-addresses \
-                --filters "Name=instance-id,Values=$INSTANCE_ID" \
-                --query "Addresses[0].AllocationId" \
-                --output text 2>/dev/null)
-
-            if [ -n "$ALLOCATION_ID" ] && [ "$ALLOCATION_ID" != "None" ]; then
-                ASSOCIATION_ID=$(aws ec2 describe-addresses \
-                    --allocation-ids "$ALLOCATION_ID" \
-                    --query "Addresses[0].AssociationId" \
-                    --output text 2>/dev/null)
-
-                if [ -n "$ASSOCIATION_ID" ] && [ "$ASSOCIATION_ID" != "None" ]; then
-                    echo "Desasociando Elastic IP..."
-                    aws ec2 disassociate-address --association-id "$ASSOCIATION_ID"
-                fi
-
-                echo "Liberando Elastic IP ($ALLOCATION_ID)..."
-                aws ec2 release-address --allocation-id "$ALLOCATION_ID"
-            fi
-
+        if [ -n "$INSTANCE_ID" ]; then
             echo "Terminando instancia $INSTANCE_ID..."
-            # Parámetros:
-            # --instance-ids: Lista de instancias que se envian a terminate
             aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
-
             echo "Esperando a que la instancia finalice completamente..."
             aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
         else
-            echo "No se encontraron instancias activas asociadas al grupo '$SG_NAME'."
+            echo "No hay InstanceId en lab-state.json."
         fi
 
-        echo "Eliminando Grupo de Seguridad '$SG_NAME' ($SG_ID)..."
-        # Parámetros:
-        # --group-id: Identificador del security group que se elimina
-        aws ec2 delete-security-group --group-id "$SG_ID"
-
-        if [ $? -eq 0 ]; then
-            echo "Infraestructura liberada correctamente de AWS."
+        if [ -n "$SG_ID" ]; then
+            echo "Eliminando Grupo de Seguridad '$SG_NAME' ($SG_ID)..."
+            aws ec2 delete-security-group --group-id "$SG_ID"
+            if [ $? -eq 0 ]; then
+                echo "Infraestructura liberada correctamente de AWS."
+            else
+                echo "Ocurrio un error al eliminar el Grupo de Seguridad."
+            fi
         else
-            echo "Ocurrio un error al eliminar el Grupo de Seguridad y recursos asociados."
+            echo "No hay GroupId en lab-state.json."
         fi
+
+        state_clear
+        echo "Eliminado $LAB_STATE_FILE"
         ;;
 
     *)
