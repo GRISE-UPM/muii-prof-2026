@@ -43,10 +43,7 @@ make delete
 
 ## Los scripts generan o actualizan estos ficheros:
 
-- `aws-scripts/public-ip.txt`: IP pública de la instancia EC2.
-- `aws-scripts/sg-id.txt`: identificador del grupo de seguridad que comparten EC2 y Aurora.
-- `aws-scripts/db-cluster-id.txt`: identificador del clúster Aurora.
-- `aws-scripts/callback-url.txt`: URL HTTPS a la que Cognito redirige tras el login.
+- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, InstanceId, AllocationId, PublicIp, …). Lo escriben los scripts de create; no versionar.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
 - `eventhub-eventos-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
@@ -106,7 +103,7 @@ Con el perfil `dev` cada uno publica su Swagger en `http://localhost:8081/swagge
 
 ### Front
 
-https://<public-ip.txt>/
+https://<PublicIp de lab-state.json>/
 
 ### Documentación OpenAPI (solo desarrollo)
 

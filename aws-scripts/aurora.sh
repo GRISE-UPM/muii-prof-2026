@@ -2,17 +2,17 @@
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=jq-functions.sh
+source "$SCRIPT_DIR/jq-functions.sh"
 
-# El identificador del clúster solo vive aquí y en db-cluster-id.txt.
-# La contraseña la genera Aurora en Secrets Manager (--manage-master-user-password):
-# no se crea en el portátil ni se envía a RDS por la CLI.
+# Constantes del laboratorio (nombres fijos; no van en lab-state.json).
+# GroupId de EC2 se lee de lab-state.json (escrito por ec2.sh create).
+# La contraseña master la genera Aurora en Secrets Manager (--manage-master-user-password).
 DB_CLUSTER_ID="eventhub-cluster-aurora"
-DB_CLUSTER_ID_FILE="$SCRIPT_DIR/db-cluster-id.txt"
 DB_INSTANCE_ID="eventhub-aurora-instance"
 DB_SUBNET_GROUP="eventhub-aurora-subnets"
-SG_ID_FILE="$SCRIPT_DIR/sg-id.txt"
 SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-eventos-springboot/src/main/resources/aurora.properties"
-DB_USER="postgres"
+DB_USER="master"
 DB_NAME="eventhub"
 DB_ENGINE="aurora-postgresql"
 DB_PORT=5432
@@ -36,19 +36,16 @@ case "$ACTION" in
             exit 1
         fi
 
-        echo "$DB_CLUSTER_ID" > "$DB_CLUSTER_ID_FILE"
-
         echo "Clúster Aurora previsto: $DB_CLUSTER_ID"
         echo "Usuario master: $DB_USER (password gestionada por Aurora en Secrets Manager)"
 
         if aws rds describe-db-clusters --db-cluster-identifier "$DB_CLUSTER_ID" >/dev/null 2>&1; then
             echo "El clúster '$DB_CLUSTER_ID' ya existe; se reutiliza."
         else
-            echo "Obteniendo la VPC por defecto y sus subnets..."
+            echo "Obteniendo la VPC por defecto..."
             # Parámetros:
             # --filters: VPC marcada como default en la cuenta (AWS Academy)
             # --query: Extrae el VpcId
-            # --output: Devuelve el resultado en texto plano
             VPC_ID=$(aws ec2 describe-vpcs \
                 --filters Name=isDefault,Values=true \
                 --query 'Vpcs[0].VpcId' \
@@ -57,26 +54,40 @@ case "$ACTION" in
                 echo "Error: No se encontró una VPC por defecto."
                 exit 1
             fi
+            state_set VpcId "$VPC_ID"
 
-            SUBNET_IDS=$(aws ec2 describe-subnets \
+            # En AWS Academy la VPC por defecto ya trae una subnet por AZ.
+            # Se listan todas; el DB subnet group usa solo las DOS primeras
+            # (Aurora exige >= 2 AZ). El subnet group es la forma de AWS de
+            # asignar subnets al cluster (create-db-cluster no admite --subnet-ids).
+            ALL_SUBNET_IDS=$(aws ec2 describe-subnets \
                 --filters "Name=vpc-id,Values=$VPC_ID" \
                 --query 'Subnets[].SubnetId' \
                 --output text)
-            if [ -z "$SUBNET_IDS" ] || [ "$SUBNET_IDS" = "None" ]; then
+            if [ -z "$ALL_SUBNET_IDS" ] || [ "$ALL_SUBNET_IDS" = "None" ]; then
                 echo "Error: No hay subnets en la VPC $VPC_ID."
                 exit 1
             fi
+            echo "Subnets disponibles en la VPC por defecto: $ALL_SUBNET_IDS"
+
+            SUBNET_IDS=$(echo "$ALL_SUBNET_IDS" | awk '{print $1, $2}')
+            SUBNET_COUNT=$(echo "$SUBNET_IDS" | awk '{print NF}')
+            if [ "$SUBNET_COUNT" -lt 2 ]; then
+                echo "Error: Hacen falta al menos 2 subnets; encontradas: $ALL_SUBNET_IDS"
+                exit 1
+            fi
+            echo "Subnets usadas en el DB subnet group (solo las dos primeras): $SUBNET_IDS"
 
             if aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SUBNET_GROUP" >/dev/null 2>&1; then
                 echo "El subnet group '$DB_SUBNET_GROUP' ya existe; se reutiliza."
             else
-                echo "Creando el subnet group '$DB_SUBNET_GROUP'..."
+                echo "Creando el subnet group '$DB_SUBNET_GROUP' con las dos primeras subnets..."
                 # Parámetros:
-                # --db-subnet-group-name: Nombre del grupo (Aurora exige subnets en al menos 2 AZ)
-                # --subnet-ids: Subnets de la VPC por defecto
+                # --db-subnet-group-name: Nombre del grupo (Aurora exige >= 2 AZ)
+                # --subnet-ids: Solo las dos primeras de la VPC por defecto
                 aws rds create-db-subnet-group \
                     --db-subnet-group-name "$DB_SUBNET_GROUP" \
-                    --db-subnet-group-description "Subnets Aurora EventHub" \
+                    --db-subnet-group-description "Subnets Aurora EventHub (2 primeras de la VPC)" \
                     --subnet-ids $SUBNET_IDS
                 if [ $? -ne 0 ]; then
                     echo "Error al crear el subnet group '$DB_SUBNET_GROUP'."
@@ -84,17 +95,9 @@ case "$ACTION" in
                 fi
             fi
 
-            echo "Usando el security group de EC2..."
-            if [ ! -f "$SG_ID_FILE" ]; then
-                echo "Error: No se encontró el identificador del Grupo de Seguridad: $SG_ID_FILE"
-                exit 1
-            fi
-            SG_ID=$(< "$SG_ID_FILE")
-            SG_ID="${SG_ID%%$'\n'}"
-            if [ -z "$SG_ID" ]; then
-                echo "Error: El archivo '$SG_ID_FILE' está vacío."
-                exit 1
-            fi
+            # Un solo security group por ahora (EC2 + Aurora). GroupId en lab-state.json.
+            echo "Usando el security group de EC2 (GroupId en lab-state.json)..."
+            SG_ID=$(state_require GroupId)
 
             PG_RULE=$(aws ec2 describe-security-groups \
                 --group-ids "$SG_ID" \
@@ -103,7 +106,7 @@ case "$ACTION" in
             if [ -z "$PG_RULE" ]; then
                 echo "Abriendo el puerto PostgreSQL 5432 en $SG_ID (tráfico desde el propio SG)..."
                 # Parámetros:
-                # --group-id: SG compartido con EC2 (sg-id.txt)
+                # --group-id: SG compartido con EC2
                 # --source-group: La instancia EC2 del mismo SG puede conectar a Aurora
                 aws ec2 authorize-security-group-ingress \
                     --group-id "$SG_ID" \
@@ -120,7 +123,7 @@ case "$ACTION" in
 
             echo "Creando el clúster Aurora '$DB_CLUSTER_ID' (password en Secrets Manager)..."
             # Parámetros:
-            # --db-cluster-identifier: Nombre elegido por este script (db-cluster-id.txt)
+            # --db-cluster-identifier: Nombre fijo del laboratorio (constante DB_CLUSTER_ID)
             # --engine: aurora-postgresql
             # --master-username: Usuario master (no puede ser 'admin' en PostgreSQL)
             # --manage-master-user-password: Aurora crea el secreto y la password; no viaja por la CLI
@@ -215,18 +218,7 @@ EOF
         ;;
 
     delete)
-        if [ ! -f "$DB_CLUSTER_ID_FILE" ]; then
-            echo "Error: No se encontró el identificador del clúster Aurora: $DB_CLUSTER_ID_FILE"
-            exit 1
-        fi
-
-        DB_CLUSTER_ID=$(< "$DB_CLUSTER_ID_FILE")
-        DB_CLUSTER_ID="${DB_CLUSTER_ID%%$'\n'}"
-        if [ -z "$DB_CLUSTER_ID" ]; then
-            echo "Error: El archivo '$DB_CLUSTER_ID_FILE' está vacío."
-            exit 1
-        fi
-
+        # Nombres de clúster/instancia: constantes del script (no lab-state.json).
         if aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_ID" >/dev/null 2>&1; then
             echo "Eliminando la instancia '$DB_INSTANCE_ID'..."
             # Parámetros:
@@ -256,7 +248,7 @@ EOF
             aws rds delete-db-subnet-group --db-subnet-group-name "$DB_SUBNET_GROUP"
         fi
 
-        rm -f "$DB_CLUSTER_ID_FILE" "$SPRING_CONFIG_FILE"
+        rm -f "$SPRING_CONFIG_FILE"
         echo "Eliminación de Aurora finalizada."
         ;;
 
