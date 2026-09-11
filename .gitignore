@@ -8,14 +8,13 @@ ssh-key/
 # Ficheros generados por aws-scripts
 aws-scripts/*.txt
 aws-scripts/lab-state.json
+docs/resources.json
+docs/architecture.png
+docs/architecture
 
 # Temporales que crean los scripts de despliegue
 aws-scripts/nginx-config-file.sh
 aws-scripts/sftp-batch-file.txt
-
-# Configuración de Cognito generada por aws-scripts/cognito.sh
-.env.local
-cognito.properties
 
 # CDK / Python
 cdk/.venv/
