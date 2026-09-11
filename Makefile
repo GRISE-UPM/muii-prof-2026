@@ -18,8 +18,6 @@ delete:
 	bash $(AWS_SCRIPTS)/back.sh delete
 	bash $(AWS_SCRIPTS)/secrets.sh delete
 	bash $(AWS_SCRIPTS)/ec2.sh delete
-	rm -f $(AWS_SCRIPTS)/public-ip.txt \
-		$(AWS_SCRIPTS)/callback-url.txt \
-		$(AWS_SCRIPTS)/sg-id.txt \
+	rm -f $(AWS_SCRIPTS)/lab-state.json \
 		eventhub-front-react/.env.production.local
 	@echo "Eliminación completa finalizada correctamente."
