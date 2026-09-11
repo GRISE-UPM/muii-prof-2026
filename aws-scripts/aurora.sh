@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/jq-functions.sh"
 
 # Constantes del laboratorio (nombres fijos; no van en lab-state.json).
-# GroupId de EC2 se lee de lab-state.json (escrito por ec2.sh create).
+# GroupId y SubnetIds se leen de lab-state.json (escritos por ec2.sh create).
 # La contraseña master la genera Aurora en Secrets Manager (--manage-master-user-password).
 DB_CLUSTER_ID="eventhub-cluster-aurora"
 DB_INSTANCE_ID="eventhub-aurora-instance"
@@ -42,49 +42,19 @@ case "$ACTION" in
         if aws rds describe-db-clusters --db-cluster-identifier "$DB_CLUSTER_ID" >/dev/null 2>&1; then
             echo "El clúster '$DB_CLUSTER_ID' ya existe; se reutiliza."
         else
-            echo "Obteniendo la VPC por defecto..."
-            # Parámetros:
-            # --filters: VPC marcada como default en la cuenta (AWS Academy)
-            # --query: Extrae el VpcId
-            VPC_ID=$(aws ec2 describe-vpcs \
-                --filters Name=isDefault,Values=true \
-                --query 'Vpcs[0].VpcId' \
-                --output text)
-            if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
-                echo "Error: No se encontró una VPC por defecto."
-                exit 1
-            fi
-            state_set VpcId "$VPC_ID"
-
-            # En AWS Academy la VPC por defecto ya trae una subnet por AZ.
-            # Se listan todas; el DB subnet group usa solo las DOS primeras
-            # (Aurora exige >= 2 AZ). El subnet group es la forma de AWS de
-            # asignar subnets al cluster (create-db-cluster no admite --subnet-ids).
-            ALL_SUBNET_IDS=$(aws ec2 describe-subnets \
-                --filters "Name=vpc-id,Values=$VPC_ID" \
-                --query 'Subnets[].SubnetId' \
-                --output text)
-            if [ -z "$ALL_SUBNET_IDS" ] || [ "$ALL_SUBNET_IDS" = "None" ]; then
-                echo "Error: No hay subnets en la VPC $VPC_ID."
-                exit 1
-            fi
-            echo "Subnets disponibles en la VPC por defecto: $ALL_SUBNET_IDS"
-
-            SUBNET_IDS=$(echo "$ALL_SUBNET_IDS" | awk '{print $1, $2}')
-            SUBNET_COUNT=$(echo "$SUBNET_IDS" | awk '{print NF}')
-            if [ "$SUBNET_COUNT" -lt 2 ]; then
-                echo "Error: Hacen falta al menos 2 subnets; encontradas: $ALL_SUBNET_IDS"
-                exit 1
-            fi
-            echo "Subnets usadas en el DB subnet group (solo las dos primeras): $SUBNET_IDS"
+            # SubnetIds: las dos primeras de la VPC, guardadas por ec2.sh.
+            # El DB subnet group es la forma de AWS de asignarlas al cluster
+            # (create-db-cluster no admite --subnet-ids).
+            SUBNET_IDS=$(state_require SubnetIds)
+            echo "SubnetIds desde lab-state.json: $SUBNET_IDS"
 
             if aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SUBNET_GROUP" >/dev/null 2>&1; then
                 echo "El subnet group '$DB_SUBNET_GROUP' ya existe; se reutiliza."
             else
-                echo "Creando el subnet group '$DB_SUBNET_GROUP' con las dos primeras subnets..."
+                echo "Creando el subnet group '$DB_SUBNET_GROUP'..."
                 # Parámetros:
                 # --db-subnet-group-name: Nombre del grupo (Aurora exige >= 2 AZ)
-                # --subnet-ids: Solo las dos primeras de la VPC por defecto
+                # --subnet-ids: Las dos SubnetIds de lab-state.json
                 aws rds create-db-subnet-group \
                     --db-subnet-group-name "$DB_SUBNET_GROUP" \
                     --db-subnet-group-description "Subnets Aurora EventHub (2 primeras de la VPC)" \
