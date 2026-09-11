@@ -41,7 +41,7 @@ make rollback
 
 ## Los scripts generan o actualizan estos ficheros:
 
-- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, InstanceId, AllocationId, PublicIp, …). Lo escriben los scripts de create; no versionar.
+- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, VpcId, SubnetIds, InstanceId, AllocationId, PublicIp, …). Lo escriben los scripts de create; no versionar.
 - `eventhub-front-react/.env.production.local`: variables utilizadas por Vite en el build de producción.
 
 ## La aplicación estará disponible en
