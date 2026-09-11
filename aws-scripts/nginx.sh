@@ -26,7 +26,7 @@ fi
 ACTION="$1"
 
 require_ssh() {
-    # PublicIp: comodidad en lab-state; tambien se obtiene desde AllocationId.
+    # PublicIp: está almacenado en lab-state.json; tambien se obtiene desde AllocationId.
     PUBLIC_IP=$(state_require PublicIp)
 
     if [ ! -f "$KEY_PATH" ]; then
