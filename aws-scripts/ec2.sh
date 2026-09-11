@@ -48,6 +48,37 @@ case "$ACTION" in
             exit 1
         fi
         state_set GroupId "$SG_ID"
+        # VpcId del SG (VPC por defecto en AWS Academy); lo reutilizan scripts posteriores.
+        VPC_ID=$(aws ec2 describe-security-groups \
+            --group-ids "$SG_ID" \
+            --query 'SecurityGroups[0].VpcId' \
+            --output text)
+        if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "Error: No se pudo obtener el VpcId del Grupo de Seguridad $SG_ID."
+            exit 1
+        fi
+        state_set VpcId "$VPC_ID"
+
+        # Subnets de la VPC: se listan todas y se guardan solo las DOS primeras
+        # (Aurora exige >= 2 AZ en el DB subnet group).
+        ALL_SUBNET_IDS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query 'Subnets[].SubnetId' \
+            --output text)
+        if [ -z "$ALL_SUBNET_IDS" ] || [ "$ALL_SUBNET_IDS" = "None" ]; then
+            echo "Error: No hay subnets en la VPC $VPC_ID."
+            exit 1
+        fi
+        echo "Subnets disponibles en la VPC $VPC_ID: $ALL_SUBNET_IDS"
+        SUBNET_1=$(echo "$ALL_SUBNET_IDS" | awk '{print $1}')
+        SUBNET_2=$(echo "$ALL_SUBNET_IDS" | awk '{print $2}')
+        if [ -z "$SUBNET_1" ] || [ -z "$SUBNET_2" ]; then
+            echo "Error: Hacen falta al menos 2 subnets; encontradas: $ALL_SUBNET_IDS"
+            exit 1
+        fi
+        state_set_array SubnetIds "$SUBNET_1" "$SUBNET_2"
+        echo "SubnetIds guardadas en lab-state.json: $SUBNET_1 $SUBNET_2"
+
 
         # Regla HTTP (Puerto 80)
         # Parámetros:
