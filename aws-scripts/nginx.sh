@@ -3,7 +3,7 @@
 # Configura Nginx: HTTPS, página estática y reverse proxy /api/ hacia Spring Boot.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=jq-functions.sh
+# Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 LOADING_HTML="$SCRIPT_DIR/loading.html"
