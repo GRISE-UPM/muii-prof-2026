@@ -16,6 +16,7 @@ deploy:
 delete:
 	bash $(AWS_SCRIPTS)/front.sh delete
 	bash $(AWS_SCRIPTS)/back.sh delete
+	bash $(AWS_SCRIPTS)/cognito.sh delete
 	bash $(AWS_SCRIPTS)/secrets.sh delete
 	bash $(AWS_SCRIPTS)/ec2.sh delete
 	rm -f $(AWS_SCRIPTS)/lab-state.json \
