@@ -14,6 +14,11 @@ bin/
 hs_err_pid*
 replay_pid*
 
+# Tests: los escriben los alumnos, así que se quedan en local y no se suben.
+# El smoke test sí se versiona, porque comprueba que la aplicación arranca.
+src/test/java/**/*Test.java
+!src/test/java/**/*SmokeTest.java
+
 # Maven wrapper descargado
 .mvn/wrapper/maven-wrapper.jar
 
