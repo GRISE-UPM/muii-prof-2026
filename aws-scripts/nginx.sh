@@ -3,8 +3,9 @@
 # Configura Nginx: HTTPS, página estática y reverse proxy /api/ hacia Spring Boot.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=jq-functions.sh
+source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
-PUBLIC_IP_FILE="$SCRIPT_DIR/public-ip.txt"
 LOADING_HTML="$SCRIPT_DIR/loading.html"
 REMOTE_LOADING="/tmp/$(basename "$LOADING_HTML")"
 REMOTE_INDEX="/var/www/html/index.html"
@@ -25,13 +26,8 @@ fi
 ACTION="$1"
 
 require_ssh() {
-    if [ ! -f "$PUBLIC_IP_FILE" ]; then
-        echo "Error: No se encontró el archivo de la IP en: $PUBLIC_IP_FILE"
-        exit 1
-    fi
-
-    PUBLIC_IP=$(< "$PUBLIC_IP_FILE")
-    PUBLIC_IP="${PUBLIC_IP%%$'\n'}"
+    # PublicIp: comodidad en lab-state; tambien se obtiene desde AllocationId.
+    PUBLIC_IP=$(state_require PublicIp)
 
     if [ ! -f "$KEY_PATH" ]; then
         echo "Error: No se encontró la clave SSH en: $KEY_PATH"
