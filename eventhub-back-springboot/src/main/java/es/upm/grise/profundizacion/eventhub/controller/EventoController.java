@@ -18,7 +18,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/eventos")
 @Tag(name = "Eventos", description = "Endpoints para la gestión, búsqueda y compra de entradas a eventos")
-@CrossOrigin(origins = "*")
 public class EventoController {
 
     private final EventoService eventoService;
