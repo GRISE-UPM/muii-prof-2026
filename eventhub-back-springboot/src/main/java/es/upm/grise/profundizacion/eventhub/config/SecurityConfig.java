@@ -3,10 +3,10 @@ package es.upm.grise.profundizacion.eventhub.config;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
@@ -34,13 +34,21 @@ public class SecurityConfig {
      * Define la cadena de filtros de seguridad (SecurityFilterChain) que procesa las peticiones HTTP entrantes.
      */
     @Bean // Objeto creado automaticamente y gestionado por Spring Boot
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, Environment env) throws Exception {
         http
             // Deshabilita la protección CSRF (común en APIs REST sin estado que usan tokens JWT)
             // TODO: Tendremos que cambiar esta opción en una versión posterior cuando introduzcamos las 
             // Lambdas como Token Handlers
             .csrf(csrf -> csrf.disable())
-            .cors(Customizer.withDefaults())
+            // Nginx sirve front y API en el mismo origen: CORS no se usa en produccion.
+            // Solo el perfil 'dev' lo activa, para el Vite en http://localhost:3000.
+            .cors(cors -> {
+                if (env.matchesProfiles("dev")) {
+                    cors.configurationSource(corsConfigurationSource());
+                } else {
+                    cors.disable();
+                }
+            })
 
             // Deshabilita la restricción de Frames (necesario para desplegar correctamente la consola H2 en iframe)
             // TODO: Se podrá activar cuando migremos a una base de datos convencional
@@ -82,10 +90,9 @@ public class SecurityConfig {
         return http.build();
     }
 
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    private CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedOrigins(List.of("http://localhost:3000"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
