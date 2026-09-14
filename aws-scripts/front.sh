@@ -46,8 +46,8 @@ case "$ACTION" in
 # .env.production.local (sufijo .local): git lo ignora. Lo genera aws-scripts/front.sh en cada
 # deploy; no editar a mano. Vite solo lo carga con \`npm run build\`, no con \`npm run dev\`.
 # Así el front local no apunta a EC2 aunque falte .env.development.
-# VITE_API_BASE_URL: origen HTTPS de la API en EC2
-VITE_API_BASE_URL=https://$PUBLIC_IP
+# VITE_API_BASE_URL: origen HTTP de la API en EC2
+VITE_API_BASE_URL=http://$PUBLIC_IP
 EOF
 
         # Compilación de la aplicación React
@@ -102,7 +102,7 @@ ENDSSH
         # Limpieza de temporales locales
         rm -f "$SFTP_BATCH_FILE"
 
-        echo "Frontend desplegado en: https://$PUBLIC_IP/"
+        echo "Frontend desplegado en: http://$PUBLIC_IP/"
         ;;
 
     delete)

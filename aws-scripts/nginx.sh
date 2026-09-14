@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Configura Nginx: HTTPS, página estática y reverse proxy /api/ hacia Spring Boot.
+# Configura Nginx: página estática y reverse proxy /api/ hacia Spring Boot.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
@@ -14,7 +14,7 @@ usage() {
     echo "Uso: $0 {deploy|delete}"
     echo ""
     echo "Ejemplos:"
-    echo "  $0 deploy # Instala Nginx, HTTPS, el proxy /api/ y una página de carga"
+    echo "  $0 deploy # Instala Nginx, el proxy /api/ y una página de carga"
     echo "  $0 delete # Detiene Nginx y vacía /var/www/html"
     exit 1
 }
@@ -57,34 +57,16 @@ case "$ACTION" in
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" \
             "REMOTE_LOADING='$REMOTE_LOADING' REMOTE_INDEX='$REMOTE_INDEX' bash -s" << 'END_NGINX'
 sudo apt-get update -y
-sudo apt-get install -y nginx openssl
-sudo mkdir -p /etc/nginx/ssl
-
-if [ ! -f /etc/nginx/ssl/nginx.crt ] || [ ! -f /etc/nginx/ssl/nginx.key ]; then
-    sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -keyout /etc/nginx/ssl/nginx.key \
-        -out /etc/nginx/ssl/nginx.crt \
-        -subj "/C=ES/ST=State/L=City/O=Dev/OU=IT/CN=*"
-fi
+sudo apt-get install -y nginx
 
 sudo tee /etc/nginx/sites-available/default > /dev/null << 'NGINX_CONF'
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl default_server;
-    listen [::]:443 ssl default_server;
-
-    ssl_certificate /etc/nginx/ssl/nginx.crt;
-    ssl_certificate_key /etc/nginx/ssl/nginx.key;
 
     root /var/www/html;
     index index.html;
-    server_name _;
 
     location /api/ {
         proxy_pass http://127.0.0.1:8080;
@@ -110,7 +92,7 @@ sudo systemctl enable nginx
 sudo systemctl restart nginx
 END_NGINX
 
-        echo "Nginx configurado en: https://$PUBLIC_IP/"
+        echo "Nginx configurado en: http://$PUBLIC_IP/"
         ;;
 
     delete)

@@ -100,13 +100,6 @@ case "$ACTION" in
             --port 80 \
             --cidr 0.0.0.0/0
 
-        # Regla HTTPS (Puerto 443)
-        aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 443 \
-            --cidr 0.0.0.0/0
-
         # Regla SSH (Puerto 22)
         aws ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \

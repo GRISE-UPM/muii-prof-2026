@@ -48,7 +48,7 @@ make rollback
 
 ### Front
 
-https://<PublicIp de lab-state.json>/
+http://<PublicIp de lab-state.json>/
 
 ### Documentación OpenAPI (solo desarrollo)
 

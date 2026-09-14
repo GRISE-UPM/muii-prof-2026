@@ -96,7 +96,7 @@ sudo systemctl enable eventhub
 sudo systemctl restart eventhub
 END_BACKEND
 
-        echo "Backend desplegado en: https://$PUBLIC_IP/api/eventos"
+        echo "Backend desplegado en: http://$PUBLIC_IP/api/eventos"
         ;;
 
     delete)
