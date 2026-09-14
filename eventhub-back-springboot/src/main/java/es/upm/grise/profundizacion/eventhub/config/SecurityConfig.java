@@ -2,7 +2,7 @@ package es.upm.grise.profundizacion.eventhub.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.config.Customizer;
+import org.springframework.core.env.Environment;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
@@ -19,11 +19,19 @@ import java.util.List;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, Environment env) throws Exception {
         http
             // Deshabilita la protección CSRF (común en APIs REST sin estado)
             .csrf(csrf -> csrf.disable())
-            .cors(Customizer.withDefaults())
+            // Nginx sirve front y API en el mismo origen: CORS no se usa en produccion.
+            // Solo el perfil 'dev' lo activa, para el Vite en http://localhost:3000.
+            .cors(cors -> {
+                if (env.matchesProfiles("dev")) {
+                    cors.configurationSource(corsConfigurationSource());
+                } else {
+                    cors.disable();
+                }
+            })
 
             // Deshabilita la restricción de Frames (necesario para desplegar correctamente la consola H2 en iframe)
             .headers(headers -> headers.frameOptions(frame -> frame.disable()))
@@ -33,10 +41,9 @@ public class SecurityConfig {
         return http.build();
     }
 
-    @Bean
-    public CorsConfigurationSource corsConfigurationSource() {
+    private CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedOrigins(List.of("http://localhost:3000"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
