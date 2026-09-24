@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Crea o borra el User Pool, el dominio y el App Client de Cognito.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
@@ -7,6 +8,7 @@ set -e
 # cognito.properties se encuentran aunque el comando no se lance desde la raíz.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
@@ -16,6 +18,7 @@ POOL_NAME="eventhub-pool"
 CLIENT_NAME="eventhub-front-react"
 CONFIG_FILE="$PROJECT_ROOT/eventhub-front-react/.env.local"
 SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-eventos-springboot/src/main/resources/cognito.properties"
+
 # Cognito rechaza el scope offline_access. El refresh token sale igual del
 # flujo authorization code si RefreshTokenValidity es mayor que 0.
 OAUTH_SCOPES="openid email profile"
@@ -69,6 +72,7 @@ case "$ACTION" in
         echo "Dominio de Cognito: $COGNITO_DOMAIN"
 
         echo "Creando User Pool '$POOL_NAME'..."
+
         # --pool-name: Directorio de usuarios
         # --auto-verified-attributes: Código de confirmación al email
         # --username-attributes: El correo es el nombre de usuario
@@ -85,6 +89,7 @@ case "$ACTION" in
         echo "User Pool creado (ID: $USER_POOL_ID)."
 
         echo "Creando dominio de Cognito '$COGNITO_DOMAIN'..."
+
         # --domain: Prefijo del Hosted UI, donde el navegador inicia el login.
         # La respuesta JSON (ManagedLoginVersion) no aporta nada: se descarta.
         aws cognito-idp create-user-pool-domain \
@@ -94,6 +99,7 @@ case "$ACTION" in
         echo "Dominio de Cognito creado."
 
         echo "Creando App Client para la SPA..."
+
         # --no-generate-secret: Cliente público; el secreto quedaría en el navegador
         # --allowed-o-auth-flows: Authorization code (con PKCE)
         # --callback-urls / --logout-urls: Únicas URLs a las que Cognito puede redirigir
@@ -148,6 +154,7 @@ EOF
         ;;
 
     delete)
+
         # IDs de lab-state.json. El dominio se borra antes que el pool.
         # El App Client desaparece al borrar el pool.
         USER_POOL_ID=$(state_require UserPoolId)

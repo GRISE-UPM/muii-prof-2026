@@ -1,16 +1,19 @@
 #!/bin/bash
 
+# Compila la SPA y la publica en /var/www/html de la instancia.
+# No tiene delete: el build desaparece con la instancia.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 APP_PATH="$PROJECT_ROOT/eventhub-front-react"
+
 # Ruta absoluta: el lote SFTP se encuentra aunque el comando no se lance desde la raíz.
-# No tiene delete: el build en /var/www/html desaparece con la instancia.
 SFTP_BATCH_FILE="$SCRIPT_DIR/sftp-batch-file.txt"
 
 # PublicIp lo dejó ec2.sh en lab-state.json.
@@ -62,9 +65,11 @@ EOF
 sftp -o StrictHostKeyChecking=no -b "$SFTP_BATCH_FILE" -i "$KEY_PATH" ubuntu@"$PUBLIC_IP"
 
 echo "Publicando los ficheros en /var/www/html..."
+
 # -T: sin pseudo-terminal, para que no avise al leer el script por stdin
 ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'ENDSSH'
 set -e
+
 # Sustituye la página de carga de nginx.sh por el frontend compilado.
 sudo rm -rf /var/www/html/*
 sudo mv /tmp/app_dist/* /var/www/html/
