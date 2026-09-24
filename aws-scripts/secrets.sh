@@ -7,7 +7,7 @@ set -e
 # Credenciales de H2 para Spring Boot. H2 es embebida: no hay host ni puerto.
 SECRET_NAME="prod/h2/admin"
 
-# En H2 el usuario puede ser cualquiera. En Aurora PostgreSQL no puede llamarse admin.
+# En H2 el usuario puede ser cualquiera.
 DB_USER="admin"
 DB_NAME="eventhub"
 
