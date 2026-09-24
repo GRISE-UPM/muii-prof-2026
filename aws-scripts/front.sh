@@ -1,15 +1,17 @@
 #!/bin/bash
 
-# Configuración por defecto con rutas relativas
+# Termina en el primer comando que falle y muestra el error de ese comando.
+set -e
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 APP_PATH="$PROJECT_ROOT/eventhub-front-react"
-SFTP_BATCH_FILE="sftp-batch-file.txt"
+# Ruta absoluta: el lote SFTP se encuentra aunque el comando no se lance desde la raíz.
+SFTP_BATCH_FILE="$SCRIPT_DIR/sftp-batch-file.txt"
 
-# Funcion para mostrar la ayuda
 usage() {
     echo "Uso: $0 {deploy|delete}"
     echo ""
@@ -19,8 +21,7 @@ usage() {
     exit 1
 }
 
-# Validar que se reciba al menos un parámetro
-if [ -z "$1" ]; then
+if [ -z "$1" ] || [ -n "$2" ]; then
     usage
 fi
 
@@ -28,7 +29,7 @@ ACTION="$1"
 
 case "$ACTION" in
     deploy)
-        # PublicIp: comodidad en lab-state; tambien se obtiene desde AllocationId.
+        # PublicIp lo dejó ec2.sh en lab-state.json.
         PUBLIC_IP=$(state_require PublicIp)
 
         if [ ! -f "$KEY_PATH" ]; then
@@ -41,23 +42,19 @@ case "$ACTION" in
             exit 1
         fi
 
-        # Solo se carga con `npm run build`. El dev usa .env.development (localhost:8080).
+        # Vite solo carga este fichero con npm run build, no con npm run dev.
         cat > "$APP_PATH/.env.production.local" <<EOF
-# .env.production.local (sufijo .local): git lo ignora. Lo genera aws-scripts/front.sh en cada
-# deploy; no editar a mano. Vite solo lo carga con \`npm run build\`, no con \`npm run dev\`.
-# Así el front local no apunta a EC2 aunque falte .env.development.
+# Generado por aws-scripts/front.sh. No editar a mano.
 # VITE_API_BASE_URL: origen HTTP de la API en EC2
 VITE_API_BASE_URL=http://$PUBLIC_IP
 EOF
 
-        # Compilación de la aplicación React
         echo "Compilando la aplicación React..."
-        cd "$APP_PATH" || exit 1
+        cd "$APP_PATH"
         npm install
         npm run build
         cd - > /dev/null
 
-        # Detección de carpeta de salida (build o dist)
         BUILD_DIR="$APP_PATH/build"
         if [ ! -d "$BUILD_DIR" ]; then
             BUILD_DIR="$APP_PATH/dist"
@@ -68,9 +65,7 @@ EOF
             exit 1
         fi
 
-        echo "Desplegando la aplicación en la instancia EC2..."
-
-        # Creación del lote SFTP subiendo a una subcarpeta temporal
+        echo "Subiendo el frontend a $PUBLIC_IP..."
         cat << EOF > "$SFTP_BATCH_FILE"
 mkdir /tmp/app_dist
 cd /tmp/app_dist
@@ -79,30 +74,25 @@ put -r .
 quit
 EOF
 
-        echo "Subiendo archivos compilados mediante SFTP..."
-        # Parámetros:
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -b: Ejecuta el lote de comandos SFTP generado en el fichero temporal
-        # -i: Ruta a la clave SSH de AWS Academy (labsuser.cer)
+        # -b: ejecuta el lote SFTP. -i: clave SSH de AWS Academy.
         sftp -o StrictHostKeyChecking=no -b "$SFTP_BATCH_FILE" -i "$KEY_PATH" ubuntu@"$PUBLIC_IP"
 
-        echo "Moviendo archivos a /var/www/html en el servidor..."
-        # Parámetros:
-        # -T: Deshabilita la asignacion de pseudo-terminal para evitar la advertencia
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy (labsuser.cer)
+        echo "Publicando los ficheros en /var/www/html..."
+        # -T: sin pseudo-terminal, para que no avise al leer el script por stdin
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'ENDSSH'
-# Sustituye la página de carga de nginx.sh por el frontend compilado
+set -e
+# Sustituye la página de carga de nginx.sh por el frontend compilado.
 sudo rm -rf /var/www/html/*
-sudo mv /tmp/app_dist/* /var/www/html/ 2>/dev/null
+sudo mv /tmp/app_dist/* /var/www/html/
 sudo rm -rf /tmp/app_dist
 sudo chown -R www-data:www-data /var/www/html
 ENDSSH
 
-        # Limpieza de temporales locales
         rm -f "$SFTP_BATCH_FILE"
 
-        echo "Frontend desplegado en: http://$PUBLIC_IP/"
+        echo "El build queda en la instancia, servido por Nginx. No va en el repositorio:"
+        echo "  http://$PUBLIC_IP/"
+        echo "Despliegue del frontend finalizado."
         ;;
 
     delete)
@@ -114,19 +104,15 @@ ENDSSH
         fi
 
         echo "Eliminando el frontend de $PUBLIC_IP..."
-        # Parámetros:
-        # -T: Deshabilita la asignacion de pseudo-terminal para evitar la advertencia
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy (labsuser.cer)
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_DELETE'
-# Vacía el document root de Nginx sin tocar el proxy /api/ del backend
+set -e
+# Vacía el document root de Nginx sin tocar el proxy /api/ del backend.
 sudo rm -rf /var/www/html/*
 sudo rm -rf /tmp/app_dist
 sudo mkdir -p /var/www/html
 sudo chown -R www-data:www-data /var/www/html
 END_DELETE
 
-        # Limpieza de temporales locales generados por el deploy
         rm -f "$SFTP_BATCH_FILE"
         rm -f "$APP_PATH/.env.production.local"
 

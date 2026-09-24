@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Termina en el primer comando que falle y muestra el error de ese comando.
+set -e
+
 # Configura Nginx: página estática y reverse proxy /api/ hacia Spring Boot.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -19,14 +22,14 @@ usage() {
     exit 1
 }
 
-if [ -z "$1" ]; then
+if [ -z "$1" ] || [ -n "$2" ]; then
     usage
 fi
 
 ACTION="$1"
 
 require_ssh() {
-    # PublicIp: está almacenado en lab-state.json; tambien se obtiene desde AllocationId.
+    # PublicIp lo dejó ec2.sh en lab-state.json.
     PUBLIC_IP=$(state_require PublicIp)
 
     if [ ! -f "$KEY_PATH" ]; then
@@ -45,17 +48,13 @@ case "$ACTION" in
         fi
 
         echo "Configurando Nginx en $PUBLIC_IP..."
-        # Parámetros:
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy
+        # -i: clave SSH de AWS Academy
         scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$LOADING_HTML" ubuntu@"$PUBLIC_IP":"$REMOTE_LOADING"
 
-        # Parámetros:
-        # -T: Deshabilita la asignacion de pseudo-terminal para evitar la advertencia
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy
+        # -T: sin pseudo-terminal, para que no avise al leer el script por stdin
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" \
             "REMOTE_LOADING='$REMOTE_LOADING' REMOTE_INDEX='$REMOTE_INDEX' bash -s" << 'END_NGINX'
+set -e
 sudo apt-get update -y
 sudo apt-get install -y nginx
 
@@ -92,7 +91,9 @@ sudo systemctl enable nginx
 sudo systemctl restart nginx
 END_NGINX
 
-        echo "Nginx configurado en: http://$PUBLIC_IP/"
+        echo "Nginx queda en la instancia. El navegador entra por HTTP y /api/ se reenvía a Spring Boot en el puerto 8080:"
+        echo "  http://$PUBLIC_IP/"
+        echo "Configuración de Nginx finalizada."
         ;;
 
     delete)
@@ -100,6 +101,7 @@ END_NGINX
 
         echo "Eliminando Nginx de $PUBLIC_IP..."
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_DELETE'
+set -e
 sudo systemctl stop nginx 2>/dev/null || true
 sudo systemctl disable nginx 2>/dev/null || true
 sudo rm -rf /var/www/html/*
