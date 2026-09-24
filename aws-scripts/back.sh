@@ -1,12 +1,13 @@
 #!/bin/bash
 
+# Compila el backend Spring Boot y lo arranca como servicio en la instancia.
+# No tiene delete: el JAR y systemd desaparecen con la instancia.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
-# Configuración del despliegue del backend Spring Boot.
-# No tiene delete: el JAR y el servicio systemd desaparecen con la instancia.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
@@ -38,16 +39,19 @@ if [ -z "$BACKEND_JAR_NAME" ] || [ ! -f "$BACKEND_JAR" ]; then
 fi
 
 echo "Subiendo el backend a $PUBLIC_IP..."
+
 # -i: clave SSH de AWS Academy (labsuser.pem)
 # -o StrictHostKeyChecking=no: el laboratorio no pide confirmar known_hosts
 scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$BACKEND_JAR" ubuntu@"$PUBLIC_IP":/tmp/eventhub.jar
 
 echo "Configurando Spring Boot en la instancia EC2..."
+
 # -T: sin pseudo-terminal, para que no avise al leer el script por stdin
 ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_BACKEND'
 set -e
 sudo apt-get update -y
 sudo apt-get install -y openjdk-21-jre-headless
+
 # En el primer despliegue el servicio aún no existe.
 sudo systemctl stop eventhub 2>/dev/null || true
 sudo systemctl disable eventhub 2>/dev/null || true

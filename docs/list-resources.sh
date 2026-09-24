@@ -1,13 +1,12 @@
 #!/bin/bash
-# Lista los recursos AWS de EventHub V1.0.0 en docs/resources.json.
-# Parte de lab-state.json (escrito por ec2.sh) y enriquece con describe-*.
-#
-# Uso: docs/list-resources.sh
 
+# Lista los recursos AWS del laboratorio en docs/resources.json.
+# Parte de lab-state.json (escrito por ec2.sh) y completa los datos con describe.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/../aws-scripts/jq-functions.sh"
 

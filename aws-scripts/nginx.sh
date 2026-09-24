@@ -1,12 +1,13 @@
 #!/bin/bash
 
+# Instala Nginx, una página de carga y el proxy /api/ hacia Spring Boot.
+# No tiene delete: Nginx y /var/www/html desaparecen al terminar la instancia.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
-# Configura Nginx: página estática y reverse proxy /api/ hacia Spring Boot.
-# No tiene delete: Nginx y /var/www/html desaparecen al terminar la instancia.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
@@ -28,6 +29,7 @@ if [ ! -f "$LOADING_HTML" ]; then
 fi
 
 echo "Configurando Nginx en $PUBLIC_IP..."
+
 # -i: clave SSH de AWS Academy
 scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$LOADING_HTML" ubuntu@"$PUBLIC_IP":"$REMOTE_LOADING"
 
