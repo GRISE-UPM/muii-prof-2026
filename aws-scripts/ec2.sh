@@ -1,9 +1,11 @@
 #!/bin/bash
 
+# Crea o borra la instancia EC2, su IP elástica y el grupo de seguridad.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
@@ -31,6 +33,7 @@ ACTION="$1"
 case "$ACTION" in
     create)
         echo "Obteniendo la VPC por defecto..."
+
         # AWS Academy ya tiene una VPC default. Este script no la crea.
         VPC_ID=$(aws ec2 describe-vpcs \
             --filters Name=isDefault,Values=true \
@@ -44,6 +47,7 @@ case "$ACTION" in
         echo "VPC por defecto: $VPC_ID"
 
         echo "Obteniendo subnets de la VPC..."
+
         # Se guardan dos: Aurora, más adelante, exige subnets en al menos dos zonas.
         ALL_SUBNET_IDS=$(aws ec2 describe-subnets \
             --filters "Name=vpc-id,Values=$VPC_ID" \
@@ -59,6 +63,7 @@ case "$ACTION" in
         echo "Subnets: $SUBNET_1 $SUBNET_2"
 
         echo "Creando grupo de seguridad '$SG_NAME'..."
+
         # --vpc-id: el grupo vive en la VPC por defecto
         SG_ID=$(aws ec2 create-security-group \
             --group-name "$SG_NAME" \
@@ -70,6 +75,7 @@ case "$ACTION" in
         echo "Grupo de seguridad creado (ID: $SG_ID)."
 
         echo "Abriendo los puertos 80 (HTTP), 443 (HTTPS) y 22 (SSH)..."
+
         # --cidr 0.0.0.0/0: cualquier origen. La respuesta repite la regla; se descarta.
         for port in 80 443 22; do
             aws ec2 authorize-security-group-ingress \
@@ -81,6 +87,7 @@ case "$ACTION" in
         done
 
         echo "Buscando la AMI de Ubuntu 22.04..."
+
         # --owners: Canonical. Se queda la Jammy amd64 más reciente.
         AMI_ID=$(aws ec2 describe-images \
             --owners 099720109477 \
@@ -90,6 +97,7 @@ case "$ACTION" in
         echo "AMI: $AMI_ID"
 
         echo "Creando la instancia EC2..."
+
         # --key-name: par vockey de AWS Academy, para el SSH de los despliegues
         # --instance-type: t2.micro, el tamaño del laboratorio
         INSTANCE_ID=$(aws ec2 run-instances \
@@ -104,6 +112,7 @@ case "$ACTION" in
         echo "Instancia creada (ID: $INSTANCE_ID)."
 
         echo "Reservando Elastic IP..."
+
         # --domain vpc: la reserva es de VPC, no de EC2-Classic
         ALLOCATION_ID=$(aws ec2 allocate-address \
             --domain vpc \
@@ -138,6 +147,7 @@ case "$ACTION" in
         ;;
 
     delete)
+
         # IDs de lab-state.json. La IP se suelta antes de terminar la instancia.
         # El grupo de seguridad se borra cuando la instancia ya no lo usa.
         # La VPC por defecto no es de este script: no se borra.

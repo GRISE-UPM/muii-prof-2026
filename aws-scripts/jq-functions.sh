@@ -1,14 +1,13 @@
 #!/bin/bash
-# Acceso a aws-scripts/lab-state.json (estado del laboratorio).
+
+# Lee y escribe lab-state.json. Los demás scripts lo cargan con source.
 # Uso: source "$SCRIPT_DIR/jq-functions.sh"
-#
 # El JSON se va poblando a medida que cada script hace create (no hace falta
 # un esquema completo desde el principio). Claves alineadas con la API de AWS
 # (GroupId, InstanceId, AllocationId, VpcId, SubnetIds, ...). PublicIp se
 # guarda por comodidad; tambien se obtiene con describe-addresses.
 # Los valores escalares son strings; listas (p. ej. SubnetIds) son arrays JSON.
 # state_get / state_require aplanan arrays a una sola linea separada por espacios.
-
 LAB_STATE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 LAB_STATE_FILE="${LAB_STATE_FILE:-$LAB_STATE_DIR/lab-state.json}"
 
