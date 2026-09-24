@@ -15,8 +15,8 @@ usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
-    echo "  $0 create"
-    echo "  $0 delete"
+    echo "  $0 create # Crea el secreto de H2"
+    echo "  $0 delete # Borra el secreto sin ventana de recuperación"
     exit 1
 }
 
