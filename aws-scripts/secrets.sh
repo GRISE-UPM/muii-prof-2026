@@ -1,10 +1,12 @@
 #!/bin/bash
 
+# Crea o borra el secreto de H2 en Secrets Manager.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
 # Credenciales de H2 para Spring Boot. H2 es embebida: no hay host ni puerto.
 SECRET_NAME="prod/h2/admin"
+
 # En H2 el usuario puede ser cualquiera. En Aurora PostgreSQL no puede llamarse admin.
 DB_USER="admin"
 DB_NAME="eventhub"
@@ -27,6 +29,7 @@ ACTION="$1"
 case "$ACTION" in
     create)
         echo "Generando la password con Secrets Manager..."
+
         # ExcludeCharacters: /, ", @, ' y \ suelen romper JSON, JDBC, SQL o el shell.
         DB_PASS=$(aws secretsmanager get-random-password \
             --password-length 32 \
@@ -46,6 +49,7 @@ case "$ACTION" in
         unset DB_PASS
 
         echo "Creando el secreto '$SECRET_NAME'..."
+
         # --secret-string: JSON con username, password y dbname. No se imprime.
         SECRET_ARN=$(aws secretsmanager create-secret \
             --name "$SECRET_NAME" \
@@ -63,6 +67,7 @@ case "$ACTION" in
 
     delete)
         echo "Eliminando el secreto '$SECRET_NAME'..."
+
         # --force-delete-without-recovery: borrado inmediato, sin ventana de recuperación
         aws secretsmanager delete-secret \
             --secret-id "$SECRET_NAME" \
