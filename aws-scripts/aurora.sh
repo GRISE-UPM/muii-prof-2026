@@ -1,10 +1,12 @@
 #!/bin/bash
 
+# Crea o borra el clúster Aurora PostgreSQL y escribe aurora.properties.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
@@ -49,6 +51,7 @@ case "$ACTION" in
         echo "Grupo de seguridad: $SG_ID"
 
         echo "Creando subnet group '$DB_SUBNET_GROUP'..."
+
         # --subnet-ids: las dos subnets de lab-state.json, en zonas distintas.
         # Sin comillas a propósito: cada subnet llega a la CLI como un argumento.
         aws rds create-db-subnet-group \
@@ -59,6 +62,7 @@ case "$ACTION" in
         echo "Subnet group creado."
 
         echo "Abriendo el puerto PostgreSQL $DB_PORT en '$SG_ID'..."
+
         # --source-group: solo la instancia del mismo grupo puede conectar a Aurora
         aws ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \
@@ -68,6 +72,7 @@ case "$ACTION" in
             --output text >/dev/null
 
         echo "Creando el clúster Aurora '$DB_CLUSTER_ID'..."
+
         # --master-username: en Aurora PostgreSQL no puede ser admin
         # --manage-master-user-password: Aurora crea el secreto; la password no pasa por la CLI
         # --no-deletion-protection: el laboratorio puede borrar el clúster
@@ -87,6 +92,7 @@ case "$ACTION" in
         aws rds wait db-cluster-available --db-cluster-identifier "$DB_CLUSTER_ID"
 
         echo "Creando la instancia Aurora '$DB_INSTANCE_ID'..."
+
         # --db-instance-class: clase mínima habitual de Aurora PostgreSQL
         # --no-publicly-accessible: solo se alcanza desde la VPC
         aws rds create-db-instance \
@@ -130,10 +136,12 @@ EOF
         ;;
 
     delete)
+
         # Nombres fijos del script. Nada se conserva: ni snapshot ni la regla del 5432.
         # La instancia se borra antes que el clúster, y el subnet group cuando ya no lo usa.
         # El secreto gestionado desaparece con el clúster.
         echo "Eliminando la instancia '$DB_INSTANCE_ID'..."
+
         # --skip-final-snapshot: no se guarda copia de la base
         aws rds delete-db-instance \
             --db-instance-identifier "$DB_INSTANCE_ID" \
@@ -155,6 +163,7 @@ EOF
 
         SG_ID=$(state_require GroupId)
         echo "Cerrando el puerto PostgreSQL $DB_PORT en '$SG_ID'..."
+
         # --source-group: la misma regla que abrió create
         aws ec2 revoke-security-group-ingress \
             --group-id "$SG_ID" \
