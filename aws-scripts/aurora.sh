@@ -49,8 +49,8 @@ case "$ACTION" in
         echo "Grupo de seguridad: $SG_ID"
 
         echo "Creando subnet group '$DB_SUBNET_GROUP'..."
-        # --subnet-ids: las dos subnets de lab-state.json, en zonas distintas
-        # shellcheck disable=SC2086
+        # --subnet-ids: las dos subnets de lab-state.json, en zonas distintas.
+        # Sin comillas a propósito: cada subnet llega a la CLI como un argumento.
         aws rds create-db-subnet-group \
             --db-subnet-group-name "$DB_SUBNET_GROUP" \
             --db-subnet-group-description "Subnets Aurora EventHub (2 primeras de la VPC)" \
