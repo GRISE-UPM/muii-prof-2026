@@ -25,8 +25,8 @@ usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
-    echo "  $0 create"
-    echo "  $0 delete"
+    echo "  $0 create # Crea el clúster Aurora y escribe aurora.properties"
+    echo "  $0 delete # Borra el clúster, el subnet group y la regla del puerto 5432"
     exit 1
 }
 
