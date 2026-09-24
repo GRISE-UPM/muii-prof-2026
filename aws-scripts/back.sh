@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Termina en el primer comando que falle y muestra el error de ese comando.
+set -e
+
 # Configuración del despliegue del backend Spring Boot
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -8,7 +11,6 @@ source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 BACKEND_PATH="$PROJECT_ROOT/eventhub-eventos-springboot"
 
-# Función para mostrar la ayuda
 usage() {
     echo "Uso: $0 {deploy|delete}"
     echo ""
@@ -18,8 +20,7 @@ usage() {
     exit 1
 }
 
-# Validar que se reciba al menos un parámetro
-if [ -z "$1" ]; then
+if [ -z "$1" ] || [ -n "$2" ]; then
     usage
 fi
 
@@ -27,7 +28,7 @@ ACTION="$1"
 
 case "$ACTION" in
     deploy)
-        # PublicIp: comodidad en lab-state; tambien se obtiene desde AllocationId.
+        # PublicIp lo dejó ec2.sh en lab-state.json.
         PUBLIC_IP=$(state_require PublicIp)
 
         if [ ! -f "$KEY_PATH" ]; then
@@ -40,10 +41,9 @@ case "$ACTION" in
             exit 1
         fi
 
-        # Empaquetar el backend como JAR ejecutable de Spring Boot
         echo "Compilando el backend Spring Boot..."
-        cd "$BACKEND_PATH" || exit 1
-        mvn clean package -DskipTests || exit 1
+        cd "$BACKEND_PATH"
+        mvn clean package -DskipTests
         BACKEND_JAR_NAME=$(find target -maxdepth 1 -type f -name '*.jar' ! -name '*.original' -print -quit)
         cd - > /dev/null
         BACKEND_JAR="$BACKEND_PATH/$BACKEND_JAR_NAME"
@@ -54,20 +54,17 @@ case "$ACTION" in
         fi
 
         echo "Subiendo el backend a $PUBLIC_IP..."
-        # Parámetros:
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy (labsuser.pem)
+        # -i: clave SSH de AWS Academy (labsuser.pem)
+        # -o StrictHostKeyChecking=no: el laboratorio no pide confirmar known_hosts
         scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$BACKEND_JAR" ubuntu@"$PUBLIC_IP":/tmp/eventhub.jar
 
-        # Instalar el runtime y registrar el servicio systemd.
         echo "Configurando Spring Boot en la instancia EC2..."
-        # Parámetros:
-        # -T: Deshabilita la asignacion de pseudo-terminal para evitar la advertencia
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy (labsuser.pem)
+        # -T: sin pseudo-terminal, para que no avise al leer el script por stdin
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_BACKEND'
+set -e
 sudo apt-get update -y
 sudo apt-get install -y openjdk-21-jre-headless
+# En el primer despliegue el servicio aún no existe.
 sudo systemctl stop eventhub 2>/dev/null || true
 sudo systemctl disable eventhub 2>/dev/null || true
 sudo rm -f /etc/systemd/system/eventhub.service
@@ -96,7 +93,9 @@ sudo systemctl enable eventhub
 sudo systemctl restart eventhub
 END_BACKEND
 
-        echo "Backend desplegado en: https://$PUBLIC_IP/api/eventos"
+        echo "El JAR queda en la instancia, como servicio systemd. No va en el repositorio:"
+        echo "  https://$PUBLIC_IP/api/eventos"
+        echo "Despliegue del backend finalizado."
         ;;
 
     delete)
@@ -108,16 +107,12 @@ END_BACKEND
         fi
 
         echo "Eliminando el backend de $PUBLIC_IP..."
-        # Parámetros:
-        # -T: Deshabilita la asignacion de pseudo-terminal para evitar la advertencia
-        # -o StrictHostKeyChecking=no: Evita el prompt interactivo de known_hosts en el laboratorio
-        # -i: Ruta a la clave SSH de AWS Academy (labsuser.pem)
         ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_DELETE'
+set -e
 sudo systemctl stop eventhub 2>/dev/null || true
 sudo systemctl disable eventhub 2>/dev/null || true
 sudo rm -f /etc/systemd/system/eventhub.service
 sudo systemctl daemon-reload
-
 sudo rm -f /opt/eventhub/eventhub.jar /tmp/eventhub.jar
 sudo rm -rf /opt/eventhub
 END_DELETE
