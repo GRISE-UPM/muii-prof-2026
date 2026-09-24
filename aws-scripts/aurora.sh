@@ -130,9 +130,11 @@ EOF
         ;;
 
     delete)
-        # Nombres fijos del script. La instancia se borra antes que el clúster,
-        # y el subnet group cuando el clúster ya no lo usa.
+        # Nombres fijos del script. Nada se conserva: ni snapshot ni la regla del 5432.
+        # La instancia se borra antes que el clúster, y el subnet group cuando ya no lo usa.
+        # El secreto gestionado desaparece con el clúster.
         echo "Eliminando la instancia '$DB_INSTANCE_ID'..."
+        # --skip-final-snapshot: no se guarda copia de la base
         aws rds delete-db-instance \
             --db-instance-identifier "$DB_INSTANCE_ID" \
             --skip-final-snapshot \
@@ -140,7 +142,7 @@ EOF
         echo "Esperando a que la instancia se elimine..."
         aws rds wait db-instance-deleted --db-instance-identifier "$DB_INSTANCE_ID"
 
-        echo "Eliminando el clúster '$DB_CLUSTER_ID'..."
+        echo "Eliminando el clúster '$DB_CLUSTER_ID' (el secreto se borra con él)..."
         aws rds delete-db-cluster \
             --db-cluster-identifier "$DB_CLUSTER_ID" \
             --skip-final-snapshot \
@@ -150,6 +152,16 @@ EOF
 
         echo "Eliminando el subnet group '$DB_SUBNET_GROUP'..."
         aws rds delete-db-subnet-group --db-subnet-group-name "$DB_SUBNET_GROUP"
+
+        SG_ID=$(state_require GroupId)
+        echo "Cerrando el puerto PostgreSQL $DB_PORT en '$SG_ID'..."
+        # --source-group: la misma regla que abrió create
+        aws ec2 revoke-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port "$DB_PORT" \
+            --source-group "$SG_ID" \
+            --output text >/dev/null
 
         rm -f "$SPRING_CONFIG_FILE"
         echo "Aurora eliminada."
