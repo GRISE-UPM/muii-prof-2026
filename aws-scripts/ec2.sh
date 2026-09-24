@@ -1,15 +1,18 @@
 #!/bin/bash
 
+# Termina en el primer comando que falle y muestra el error de ese comando.
+set -e
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
-# Configuración por defecto (constantes del laboratorio; no van en lab-state.json)
+# Constantes. VpcId, SubnetIds, GroupId, InstanceId, AllocationId,
+# AssociationId y PublicIp se escriben en lab-state.json al hacer create.
 SG_NAME="eventhub-sg"
 KEY_NAME="vockey"
 INSTANCE_TYPE="t2.micro"
 
-# Funcion para mostrar la ayuda
 usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
@@ -19,7 +22,6 @@ usage() {
     exit 1
 }
 
-# Validar que se reciba exactamente un parametro
 if [ -z "$1" ] || [ -n "$2" ]; then
     usage
 fi
@@ -28,13 +30,8 @@ ACTION="$1"
 
 case "$ACTION" in
     create)
-        echo "Creando la infraestructura EC2."
-
-        # VPC por defecto de la cuenta (AWS Academy); independiente del security group.
-        # Parámetros:
-        # --filters: VPC marcada como default
-        # --query: Extrae el VpcId
         echo "Obteniendo la VPC por defecto..."
+        # AWS Academy ya tiene una VPC default. Este script no la crea.
         VPC_ID=$(aws ec2 describe-vpcs \
             --filters Name=isDefault,Values=true \
             --query 'Vpcs[0].VpcId' \
@@ -44,98 +41,57 @@ case "$ACTION" in
             exit 1
         fi
         state_set VpcId "$VPC_ID"
-        echo "VpcId guardado en lab-state.json: $VPC_ID"
+        echo "VPC por defecto: $VPC_ID"
 
-        # Subnets de la VPC: se listan todas y se guardan solo las DOS primeras
-        # (Aurora exige >= 2 AZ en el DB subnet group).
+        echo "Obteniendo subnets de la VPC..."
+        # Se guardan dos: Aurora, más adelante, exige subnets en al menos dos zonas.
         ALL_SUBNET_IDS=$(aws ec2 describe-subnets \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query 'Subnets[].SubnetId' \
             --output text)
-        if [ -z "$ALL_SUBNET_IDS" ] || [ "$ALL_SUBNET_IDS" = "None" ]; then
-            echo "Error: No hay subnets en la VPC $VPC_ID."
-            exit 1
-        fi
-        echo "Subnets disponibles en la VPC $VPC_ID: $ALL_SUBNET_IDS"
         SUBNET_1=$(echo "$ALL_SUBNET_IDS" | awk '{print $1}')
         SUBNET_2=$(echo "$ALL_SUBNET_IDS" | awk '{print $2}')
         if [ -z "$SUBNET_1" ] || [ -z "$SUBNET_2" ]; then
-            echo "Error: Hacen falta al menos 2 subnets; encontradas: $ALL_SUBNET_IDS"
+            echo "Error: Hacen falta al menos 2 subnets en la VPC $VPC_ID; encontradas: ${ALL_SUBNET_IDS:-ninguna}"
             exit 1
         fi
         state_set_array SubnetIds "$SUBNET_1" "$SUBNET_2"
-        echo "SubnetIds guardadas en lab-state.json: $SUBNET_1 $SUBNET_2"
+        echo "Subnets: $SUBNET_1 $SUBNET_2"
 
-        # Creación del grupo de seguridad en esa VPC
-        echo "Creando Grupo de Seguridad."
-        # Parámetros:
-        # --group-name: Nombre del security group que se creara en AWS
-        # --description: Texto descriptivo visible en la consola de EC2
-        # --vpc-id: VPC donde vive el SG (la por defecto, ya en lab-state)
-        # --query: Extrae unicamente el valor del campo "GroupId" de la respuesta JSON
-        # --output: Devuelve el resultado en texto plano sin comillas para asignarlo a la variable
+        echo "Creando grupo de seguridad '$SG_NAME'..."
+        # --vpc-id: el grupo vive en la VPC por defecto
         SG_ID=$(aws ec2 create-security-group \
             --group-name "$SG_NAME" \
             --description "Permite trafico HTTP, HTTPS y SSH al servidor EC2" \
             --vpc-id "$VPC_ID" \
             --query "GroupId" \
             --output text)
-
-        if [ -z "$SG_ID" ]; then
-            echo "Error al crear el Grupo de Seguridad."
-            exit 1
-        fi
         state_set GroupId "$SG_ID"
-        echo "GroupId guardado en lab-state.json: $SG_ID ($SG_NAME)"
+        echo "Grupo de seguridad creado (ID: $SG_ID)."
 
-        # Regla HTTP (Puerto 80)
-        # Parámetros:
-        # --group-id: Identificador del security group al que se anade la regla
-        # --protocol: Protocolo de red permitido (tcp)
-        # --port: Puerto de entrada que se abre
-        # --cidr: Rango de direcciones IP autorizadas (0.0.0.0/0 = cualquier origen)
-        aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 80 \
-            --cidr 0.0.0.0/0
+        echo "Abriendo los puertos 80 (HTTP), 443 (HTTPS) y 22 (SSH)..."
+        # --cidr 0.0.0.0/0: cualquier origen. La respuesta repite la regla; se descarta.
+        for port in 80 443 22; do
+            aws ec2 authorize-security-group-ingress \
+                --group-id "$SG_ID" \
+                --protocol tcp \
+                --port "$port" \
+                --cidr 0.0.0.0/0 \
+                --output text >/dev/null
+        done
 
-        # Regla HTTPS (Puerto 443)
-        aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 443 \
-            --cidr 0.0.0.0/0
-
-        # Regla SSH (Puerto 22)
-        aws ec2 authorize-security-group-ingress \
-            --group-id "$SG_ID" \
-            --protocol tcp \
-            --port 22 \
-            --cidr 0.0.0.0/0
-
-        # Obtener la AMI de Ubuntu 22.04 LTS mas reciente
-        # Parámetros:
-        # --owners: Identificador de Canonical, publicador oficial de las AMI de Ubuntu
-        # --filters: Restringe el listado a Ubuntu 22.04 LTS amd64 con virtualizacion HVM
-        # --query: Ordena por fecha y extrae el ImageId de la AMI mas reciente
-        # --output: Devuelve el resultado en texto plano
+        echo "Buscando la AMI de Ubuntu 22.04..."
+        # --owners: Canonical. Se queda la Jammy amd64 más reciente.
         AMI_ID=$(aws ec2 describe-images \
             --owners 099720109477 \
             --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*" \
             --query 'sort_by(Images, &CreationDate)[-1].ImageId' \
             --output text)
+        echo "AMI: $AMI_ID"
 
-        # Creación de la instancia EC2
-        echo "Creación de la instancia EC2"
-        # Parámetros:
-        # --image-id: AMI de Ubuntu que se utilizara como disco de arranque
-        # --count: Numero de instancias a lanzar
-        # --instance-type: Tamano de la maquina virtual (t2.micro en AWS Academy)
-        # --key-name: Par de claves SSH (vockey) para acceder a la instancia
-        # --security-group-ids: Security group que abre HTTP, HTTPS y SSH
-        # --query: Extrae el InstanceId de la primera instancia creada
-        # --output: Devuelve el resultado en texto plano
+        echo "Creando la instancia EC2..."
+        # --key-name: par vockey de AWS Academy, para el SSH de los despliegues
+        # --instance-type: t2.micro, el tamaño del laboratorio
         INSTANCE_ID=$(aws ec2 run-instances \
             --image-id "$AMI_ID" \
             --count 1 \
@@ -145,30 +101,21 @@ case "$ACTION" in
             --query "Instances[0].InstanceId" \
             --output text)
         state_set InstanceId "$INSTANCE_ID"
+        echo "Instancia creada (ID: $INSTANCE_ID)."
 
-        # Reserva de una IP estática (Elastic IP)
         echo "Reservando Elastic IP..."
-        # Parámetros:
-        # --domain: Reserva la IP en una VPC (obligatorio en cuentas actuales)
-        # --query: Extrae el AllocationId necesario para asociar la IP despues
-        # --output: Devuelve el resultado en texto plano
+        # --domain vpc: la reserva es de VPC, no de EC2-Classic
         ALLOCATION_ID=$(aws ec2 allocate-address \
             --domain vpc \
             --query "AllocationId" \
             --output text)
         state_set AllocationId "$ALLOCATION_ID"
+        echo "Elastic IP reservada (AllocationId: $ALLOCATION_ID)."
 
-        echo "Esperando que la instancia cambie a estado running..."
-        # Parámetros:
-        # --instance-id: Identificador de la instancia cuyo estado se espera
-        aws ec2 wait instance-running \
-            --instance-id "$INSTANCE_ID"
+        echo "Esperando a que la instancia esté running..."
+        aws ec2 wait instance-running --instance-id "$INSTANCE_ID"
 
-        echo "Asociando Elastic IP a la instancia..."
-        # Parámetros:
-        # --instance-id: Instancia a la que se liga la Elastic IP
-        # --allocation-id: Reserva de IP publica obtenida en el paso anterior
-        # --query: AssociationId para poder desasociar en delete sin consultar AWS
+        echo "Asociando la Elastic IP a la instancia..."
         ASSOCIATION_ID=$(aws ec2 associate-address \
             --instance-id "$INSTANCE_ID" \
             --allocation-id "$ALLOCATION_ID" \
@@ -176,67 +123,46 @@ case "$ACTION" in
             --output text)
         state_set AssociationId "$ASSOCIATION_ID"
 
-        # Parámetros:
-        # --allocation-ids: Identificador de la Elastic IP cuya direccion se consulta
-        # --query: Extrae la direccion IPv4 publica
-        # --output: Devuelve el resultado en texto plano
-        # PublicIp: comodidad para nginx/back/front; tambien se obtiene con
-        # describe-addresses --allocation-ids (AllocationId).
         PUBLIC_IP=$(aws ec2 describe-addresses \
             --allocation-ids "$ALLOCATION_ID" \
             --query "Addresses[0].PublicIp" \
             --output text)
         state_set PublicIp "$PUBLIC_IP"
 
-        echo "Instancia activa en la IP fija: $PUBLIC_IP"
-        echo "Estado del laboratorio: $LAB_STATE_FILE"
-        echo "Esperando 45 segundos para completar la inicializacion"
+        echo "La instancia, la IP y el grupo de seguridad quedan en lab-state.json. Nginx, el backend y el frontend los leen al desplegar; no van en el código:"
+        echo "  $LAB_STATE_FILE"
+        echo "  IP pública: $PUBLIC_IP"
+        echo "Esperando 45 segundos para que la instancia termine de arrancar..."
         sleep 45
-
-        echo "Creación de instancia EC2 finalizada."
+        echo "Creación de la instancia EC2 finalizada."
         ;;
 
     delete)
-        echo "Eliminando infraestructura EC2 segun $LAB_STATE_FILE..."
+        # IDs de lab-state.json. La IP se suelta antes de terminar la instancia.
+        # El grupo de seguridad se borra cuando la instancia ya no lo usa.
+        # La VPC por defecto no es de este script: no se borra.
+        ASSOCIATION_ID=$(state_require AssociationId)
+        ALLOCATION_ID=$(state_require AllocationId)
+        INSTANCE_ID=$(state_require InstanceId)
+        SG_ID=$(state_require GroupId)
 
-        INSTANCE_ID=$(state_get InstanceId)
-        ALLOCATION_ID=$(state_get AllocationId)
-        ASSOCIATION_ID=$(state_get AssociationId)
-        SG_ID=$(state_get GroupId)
+        echo "Desasociando Elastic IP '$ASSOCIATION_ID'..."
+        aws ec2 disassociate-address --association-id "$ASSOCIATION_ID"
 
-        if [ -n "$ASSOCIATION_ID" ]; then
-            echo "Desasociando Elastic IP (AssociationId=$ASSOCIATION_ID)..."
-            aws ec2 disassociate-address --association-id "$ASSOCIATION_ID" 2>/dev/null || true
-        fi
+        echo "Liberando Elastic IP '$ALLOCATION_ID'..."
+        aws ec2 release-address --allocation-id "$ALLOCATION_ID"
 
-        if [ -n "$ALLOCATION_ID" ]; then
-            echo "Liberando Elastic IP (AllocationId=$ALLOCATION_ID)..."
-            aws ec2 release-address --allocation-id "$ALLOCATION_ID" 2>/dev/null || true
-        fi
+        echo "Terminando instancia '$INSTANCE_ID'..."
+        aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" --output text >/dev/null
 
-        if [ -n "$INSTANCE_ID" ]; then
-            echo "Terminando instancia $INSTANCE_ID..."
-            aws ec2 terminate-instances --instance-ids "$INSTANCE_ID"
-            echo "Esperando a que la instancia finalice completamente..."
-            aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
-        else
-            echo "No hay InstanceId en lab-state.json."
-        fi
+        echo "Esperando a que la instancia termine..."
+        aws ec2 wait instance-terminated --instance-ids "$INSTANCE_ID"
 
-        if [ -n "$SG_ID" ]; then
-            echo "Eliminando Grupo de Seguridad '$SG_NAME' ($SG_ID)..."
-            aws ec2 delete-security-group --group-id "$SG_ID"
-            if [ $? -eq 0 ]; then
-                echo "Infraestructura liberada correctamente de AWS."
-            else
-                echo "Ocurrio un error al eliminar el Grupo de Seguridad."
-            fi
-        else
-            echo "No hay GroupId en lab-state.json."
-        fi
+        echo "Eliminando grupo de seguridad '$SG_ID'..."
+        aws ec2 delete-security-group --group-id "$SG_ID"
 
         state_clear
-        echo "Eliminado $LAB_STATE_FILE"
+        echo "Infraestructura EC2 eliminada."
         ;;
 
     *)
