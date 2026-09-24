@@ -3,7 +3,8 @@
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
-# Configuración del despliegue del backend Spring Boot
+# Configuración del despliegue del backend Spring Boot.
+# No tiene delete: el JAR y el servicio systemd desaparecen con la instancia.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
@@ -12,11 +13,10 @@ KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 BACKEND_PATH="$PROJECT_ROOT/eventhub-back-springboot"
 
 usage() {
-    echo "Uso: $0 {deploy|delete}"
+    echo "Uso: $0 deploy"
     echo ""
     echo "Ejemplos:"
     echo "  $0 deploy # Compila y despliega el backend"
-    echo "  $0 delete # Elimina el JAR y el servicio systemd"
     exit 1
 }
 
@@ -96,28 +96,6 @@ END_BACKEND
         echo "El JAR queda en la instancia, como servicio systemd. No va en el repositorio:"
         echo "  http://$PUBLIC_IP/api/eventos"
         echo "Despliegue del backend finalizado."
-        ;;
-
-    delete)
-        PUBLIC_IP=$(state_require PublicIp)
-
-        if [ ! -f "$KEY_PATH" ]; then
-            echo "Error: No se encontró la clave SSH en: $KEY_PATH"
-            exit 1
-        fi
-
-        echo "Eliminando el backend de $PUBLIC_IP..."
-        ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_DELETE'
-set -e
-sudo systemctl stop eventhub 2>/dev/null || true
-sudo systemctl disable eventhub 2>/dev/null || true
-sudo rm -f /etc/systemd/system/eventhub.service
-sudo systemctl daemon-reload
-sudo rm -f /opt/eventhub/eventhub.jar /tmp/eventhub.jar
-sudo rm -rf /opt/eventhub
-END_DELETE
-
-        echo "Backend eliminado."
         ;;
 
     *)

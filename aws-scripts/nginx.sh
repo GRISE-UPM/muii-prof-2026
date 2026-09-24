@@ -4,6 +4,7 @@
 set -e
 
 # Configura Nginx: página estática y reverse proxy /api/ hacia Spring Boot.
+# No tiene delete: Nginx y /var/www/html desaparecen al terminar la instancia.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
@@ -14,11 +15,10 @@ REMOTE_LOADING="/tmp/$(basename "$LOADING_HTML")"
 REMOTE_INDEX="/var/www/html/index.html"
 
 usage() {
-    echo "Uso: $0 {deploy|delete}"
+    echo "Uso: $0 deploy"
     echo ""
     echo "Ejemplos:"
     echo "  $0 deploy # Instala Nginx, el proxy /api/ y una página de carga"
-    echo "  $0 delete # Detiene Nginx y vacía /var/www/html"
     exit 1
 }
 
@@ -94,22 +94,6 @@ END_NGINX
         echo "Nginx queda en la instancia. El navegador entra por HTTP y /api/ se reenvía a Spring Boot en el puerto 8080:"
         echo "  http://$PUBLIC_IP/"
         echo "Configuración de Nginx finalizada."
-        ;;
-
-    delete)
-        require_ssh
-
-        echo "Eliminando Nginx de $PUBLIC_IP..."
-        ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_DELETE'
-set -e
-sudo systemctl stop nginx 2>/dev/null || true
-sudo systemctl disable nginx 2>/dev/null || true
-sudo rm -rf /var/www/html/*
-sudo mkdir -p /var/www/html
-sudo chown -R www-data:www-data /var/www/html
-END_DELETE
-
-        echo "Nginx detenido y /var/www/html vacío."
         ;;
 
     *)

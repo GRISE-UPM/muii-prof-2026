@@ -10,14 +10,14 @@ source "$SCRIPT_DIR/jq-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 APP_PATH="$PROJECT_ROOT/eventhub-front-react"
 # Ruta absoluta: el lote SFTP se encuentra aunque el comando no se lance desde la raíz.
+# No tiene delete: el build en /var/www/html desaparece con la instancia.
 SFTP_BATCH_FILE="$SCRIPT_DIR/sftp-batch-file.txt"
 
 usage() {
-    echo "Uso: $0 {deploy|delete}"
+    echo "Uso: $0 deploy"
     echo ""
     echo "Ejemplos:"
     echo "  $0 deploy # Compila y despliega el frontend"
-    echo "  $0 delete # Elimina los ficheros estáticos del frontend en EC2"
     exit 1
 }
 
@@ -93,30 +93,6 @@ ENDSSH
         echo "El build queda en la instancia, servido por Nginx. No va en el repositorio:"
         echo "  http://$PUBLIC_IP/"
         echo "Despliegue del frontend finalizado."
-        ;;
-
-    delete)
-        PUBLIC_IP=$(state_require PublicIp)
-
-        if [ ! -f "$KEY_PATH" ]; then
-            echo "Error: No se encontró la clave SSH en: $KEY_PATH"
-            exit 1
-        fi
-
-        echo "Eliminando el frontend de $PUBLIC_IP..."
-        ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'END_DELETE'
-set -e
-# Vacía el document root de Nginx sin tocar el proxy /api/ del backend.
-sudo rm -rf /var/www/html/*
-sudo rm -rf /tmp/app_dist
-sudo mkdir -p /var/www/html
-sudo chown -R www-data:www-data /var/www/html
-END_DELETE
-
-        rm -f "$SFTP_BATCH_FILE"
-        rm -f "$APP_PATH/.env.production.local"
-
-        echo "Frontend eliminado de /var/www/html."
         ;;
 
     *)
