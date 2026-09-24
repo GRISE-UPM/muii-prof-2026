@@ -19,8 +19,8 @@ usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
-    echo "  $0 create"
-    echo "  $0 delete"
+    echo "  $0 create # Crea la instancia, la IP elástica y el grupo de seguridad"
+    echo "  $0 delete # Borra la IP, la instancia y el grupo de seguridad"
     exit 1
 }
 
