@@ -14,46 +14,26 @@ LOADING_HTML="$SCRIPT_DIR/loading.html"
 REMOTE_LOADING="/tmp/$(basename "$LOADING_HTML")"
 REMOTE_INDEX="/var/www/html/index.html"
 
-usage() {
-    echo "Uso: $0 deploy"
-    echo ""
-    echo "Ejemplos:"
-    echo "  $0 deploy # Instala Nginx, el proxy /api/ y una página de carga"
-    exit 1
-}
+# PublicIp lo dejó ec2.sh en lab-state.json.
+PUBLIC_IP=$(state_require PublicIp)
 
-if [ -z "$1" ] || [ -n "$2" ]; then
-    usage
+if [ ! -f "$KEY_PATH" ]; then
+    echo "Error: No se encontró la clave SSH en: $KEY_PATH"
+    exit 1
 fi
 
-ACTION="$1"
+if [ ! -f "$LOADING_HTML" ]; then
+    echo "Error: No se encontró la página de carga en: $LOADING_HTML"
+    exit 1
+fi
 
-require_ssh() {
-    # PublicIp lo dejó ec2.sh en lab-state.json.
-    PUBLIC_IP=$(state_require PublicIp)
+echo "Configurando Nginx en $PUBLIC_IP..."
+# -i: clave SSH de AWS Academy
+scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$LOADING_HTML" ubuntu@"$PUBLIC_IP":"$REMOTE_LOADING"
 
-    if [ ! -f "$KEY_PATH" ]; then
-        echo "Error: No se encontró la clave SSH en: $KEY_PATH"
-        exit 1
-    fi
-}
-
-case "$ACTION" in
-    deploy)
-        require_ssh
-
-        if [ ! -f "$LOADING_HTML" ]; then
-            echo "Error: No se encontró la página de carga en: $LOADING_HTML"
-            exit 1
-        fi
-
-        echo "Configurando Nginx en $PUBLIC_IP..."
-        # -i: clave SSH de AWS Academy
-        scp -o StrictHostKeyChecking=no -i "$KEY_PATH" "$LOADING_HTML" ubuntu@"$PUBLIC_IP":"$REMOTE_LOADING"
-
-        # -T: sin pseudo-terminal, para que no avise al leer el script por stdin
-        ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" \
-            "REMOTE_LOADING='$REMOTE_LOADING' REMOTE_INDEX='$REMOTE_INDEX' bash -s" << 'END_NGINX'
+# -T: sin pseudo-terminal, para que no avise al leer el script por stdin
+ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" \
+    "REMOTE_LOADING='$REMOTE_LOADING' REMOTE_INDEX='$REMOTE_INDEX' bash -s" << 'END_NGINX'
 set -e
 sudo apt-get update -y
 sudo apt-get install -y nginx
@@ -91,12 +71,6 @@ sudo systemctl enable nginx
 sudo systemctl restart nginx
 END_NGINX
 
-        echo "Nginx queda en la instancia. El navegador entra por HTTP y /api/ se reenvía a Spring Boot en el puerto 8080:"
-        echo "  http://$PUBLIC_IP/"
-        echo "Configuración de Nginx finalizada."
-        ;;
-
-    *)
-        usage
-        ;;
-esac
+echo "Nginx queda en la instancia. El navegador entra por HTTP y /api/ se reenvía a Spring Boot en el puerto 8080:"
+echo "  http://$PUBLIC_IP/"
+echo "Configuración de Nginx finalizada."
