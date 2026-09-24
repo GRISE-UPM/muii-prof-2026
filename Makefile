@@ -13,9 +13,9 @@ deploy:
 	bash $(AWS_SCRIPTS)/front.sh deploy
 	@echo "Despliegue completo finalizado correctamente."
 
+# Nginx, el JAR y el frontend están en el disco de la instancia: ec2.sh delete se los lleva.
+# .env.production.local es local; no vive en EC2.
 delete:
-	bash $(AWS_SCRIPTS)/front.sh delete
-	bash $(AWS_SCRIPTS)/back.sh delete
 	bash $(AWS_SCRIPTS)/cognito.sh delete
 	bash $(AWS_SCRIPTS)/aurora.sh delete
 	bash $(AWS_SCRIPTS)/ec2.sh delete
