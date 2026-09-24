@@ -1,35 +1,42 @@
 #!/bin/bash
 
+# Termina en el primer comando que falle y muestra el error de ese comando.
+set -e
+
+# Rutas absolutas del script y del repositorio. Así jq-functions.sh, .env.local y
+# cognito.properties se encuentran aunque el comando no se lance desde la raíz.
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
-# Configuración por defecto (constantes; no van en lab-state.json).
-# Region, UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri y CognitoDomainUrl
-# se escriben en lab-state.json al hacer create.
+# Constantes. Region, UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri y
+# CognitoDomainUrl se escriben en lab-state.json al hacer create.
 POOL_NAME="eventhub-pool"
 CLIENT_NAME="eventhub-front-react"
 CONFIG_FILE="$PROJECT_ROOT/eventhub-front-react/.env.local"
 SPRING_CONFIG_FILE="$PROJECT_ROOT/eventhub-back-springboot/src/main/resources/cognito.properties"
-# Cognito no admite el scope OIDC 'offline_access'; el refresh token se emite
-# con el flujo authorization code si el client tiene RefreshTokenValidity > 0.
+# Cognito rechaza el scope offline_access. El refresh token sale igual del
+# flujo authorization code si RefreshTokenValidity es mayor que 0.
 OAUTH_SCOPES="openid email profile"
 REFRESH_TOKEN_VALIDITY_DAYS=30
 
-# Validar que se reciba exactamente un parametro
-if [ -z "$1" ] || [ -n "$2" ]; then
+usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
     echo "  $0 create"
     echo "  $0 delete"
     exit 1
+}
+
+if [ -z "$1" ] || [ -n "$2" ]; then
+    usage
 fi
 
 ACTION="$1"
 
-# Región de la CLI / entorno (Academy suele ser us-east-1); hace falta para las URLs de Cognito.
+# Región de la CLI (Academy suele ser us-east-1). Hace falta para las URLs.
 AWS_REGION=$(aws configure get region 2>/dev/null || true)
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
 if [ -z "$AWS_REGION" ]; then
@@ -37,8 +44,8 @@ if [ -z "$AWS_REGION" ]; then
     exit 1
 fi
 
-# El prefijo del Hosted UI es único en toda la región, no solo en esta cuenta.
-# Se añade el ID de cuenta para que no choque entre alumnos o laboratorios.
+# El prefijo del Hosted UI es único en toda la región. El ID de cuenta evita
+# que choque entre alumnos o laboratorios.
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 if [ -z "$AWS_ACCOUNT_ID" ] || [ "$AWS_ACCOUNT_ID" = "None" ]; then
     echo "Error: No se pudo obtener el ID de la cuenta de AWS."
@@ -48,181 +55,68 @@ COGNITO_DOMAIN="muii-prof-2026-${AWS_ACCOUNT_ID}"
 
 case "$ACTION" in
     create)
-        CONFIG_PARENT_DIR="$(dirname "$CONFIG_FILE")"
-        SPRING_CONFIG_PARENT_DIR="$(dirname "$SPRING_CONFIG_FILE")"
+        for dir in "$(dirname "$CONFIG_FILE")" "$(dirname "$SPRING_CONFIG_FILE")"; do
+            if [ ! -d "$dir" ]; then
+                echo "Error: No existe la carpeta: $dir"
+                exit 1
+            fi
+        done
 
-        if [ ! -d "$CONFIG_PARENT_DIR" ]; then
-            echo "Error: No existe la carpeta de configuración del frontend: $CONFIG_PARENT_DIR"
-            exit 1
-        fi
-
-        if [ ! -d "$SPRING_CONFIG_PARENT_DIR" ]; then
-            echo "Error: No existe la carpeta de recursos de Spring Boot: $SPRING_CONFIG_PARENT_DIR"
-            exit 1
-        fi
-
-        # Callback HTTPS de la SPA: se deriva de PublicIp (lab-state.json / EC2).
-        # Tambien se podria reconstruir con describe-addresses --allocation-ids.
+        # Callback HTTPS de la SPA. PublicIp lo dejó ec2.sh en lab-state.json.
         PUBLIC_IP=$(state_require PublicIp)
         CALLBACK_URL="https://${PUBLIC_IP}"
-
         echo "Callback de Cognito: $CALLBACK_URL"
         echo "Dominio de Cognito: $COGNITO_DOMAIN"
 
-        # Si el dominio ya existe en esta cuenta, se reutiliza su User Pool.
-        # describe-user-pool-domain solo ve dominios de esta cuenta; si está en otra,
-        # devuelve vacío y create-user-pool-domain falla.
-        # Parámetros:
-        # --domain: Prefijo del Hosted UI
-        # --query: Extrae el User Pool ligado a ese prefijo
-        # --output: Devuelve el resultado en texto plano
-        DOMAIN_POOL=$(aws cognito-idp describe-user-pool-domain \
-            --domain "$COGNITO_DOMAIN" \
-            --query "DomainDescription.UserPoolId" \
-            --output text 2>/dev/null || true)
-
-        if [ -n "$DOMAIN_POOL" ] && [ "$DOMAIN_POOL" != "None" ]; then
-            USER_POOL_ID="$DOMAIN_POOL"
-            echo "El dominio '$COGNITO_DOMAIN' ya pertenece al User Pool '$USER_POOL_ID'. Se reutiliza."
-        else
-            # Consultar el ID del User Pool por nombre:
-            # Parámetros:
-            # --max-results: Limita el escaneo a los primeros 60 User Pools registrados en la cuenta
-            # --query: Filtra la lista buscando el elemento con el nombre especificado y obtiene su ID
-            # --output: Devuelve el resultado filtrado como texto plano
-            USER_POOL_ID=$(aws cognito-idp list-user-pools \
-                --max-results 60 \
-                --query "UserPools[?Name=='$POOL_NAME'].Id | [0]" \
-                --output text)
-
-            if [ -n "$USER_POOL_ID" ] && [ "$USER_POOL_ID" != "None" ]; then
-                echo "User Pool '$POOL_NAME' ya existe (ID: $USER_POOL_ID). Se reutiliza y se regeneran los ficheros de configuración."
-            else
-                # Crear el User Pool en AWS
-                echo "Creando User Pool con nombre: '$POOL_NAME'..."
-                # Parámetros:
-                # --pool-name: Nombre del directorio de usuarios que se creara en AWS
-                # --auto-verified-attributes: Envia automaticamente un codigo de confirmacion al email
-                # --username-attributes: Permite iniciar sesion usando la direccion de correo como usuario
-                # --admin-create-user-config: Permite el autorregistro publico de usuarios (Self-service sign up)
-                # --policies: Define la complejidad y longitud minima exigida para las contraseñas
-                # --query: Extrae unicamente el valor del campo "Id" de la respuesta JSON
-                # --output: Devuelve el resultado en texto plano sin comillas para asignarlo a la variable
-                USER_POOL_ID=$(aws cognito-idp create-user-pool \
-                    --pool-name "$POOL_NAME" \
-                    --auto-verified-attributes email \
-                    --username-attributes email \
-                    --admin-create-user-config AllowAdminCreateUserOnly=false \
-                    --policies '{"PasswordPolicy":{"MinimumLength":8,"RequireUppercase":true,"RequireLowercase":true,"RequireNumbers":true,"RequireSymbols":false}}' \
-                    --query "UserPool.Id" \
-                    --output text)
-
-                if [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" = "None" ]; then
-                    echo "Error al crear el User Pool."
-                    exit 1
-                fi
-
-                echo "User Pool '$POOL_NAME' creado (ID: $USER_POOL_ID)."
-            fi
-
-            echo "Creando dominio de Cognito"
-            # Parámetros:
-            # --domain: Prefijo del dominio. Sirve para iniciar la autorización OAuth 2.0 redirigiendo a la
-            #           página web de login adecuada
-            # --user-pool-id: ID del User Pool al que se asocia el dominio
-            aws cognito-idp create-user-pool-domain \
-                --domain "$COGNITO_DOMAIN" \
-                --user-pool-id "$USER_POOL_ID"
-            if [ $? -ne 0 ]; then
-                echo "Error al crear el dominio de Cognito '$COGNITO_DOMAIN'."
-                exit 1
-            fi
-        fi
-
-        # Localiza el App Client de la SPA dentro del User Pool
-        # Parámetros:
-        # --user-pool-id: ID del User Pool donde buscar el cliente
-        # --max-results: Limita el escaneo a los primeros 60 clientes del pool
-        # --query: Extrae el ClientId del cliente cuyo nombre coincide con CLIENT_NAME
-        # --output: Devuelve el resultado filtrado como texto plano
-        CLIENT_ID=$(aws cognito-idp list-user-pool-clients \
-            --user-pool-id "$USER_POOL_ID" \
-            --max-results 60 \
-            --query "UserPoolClients[?ClientName=='$CLIENT_NAME'].ClientId | [0]" \
+        echo "Creando User Pool '$POOL_NAME'..."
+        # --pool-name: Directorio de usuarios
+        # --auto-verified-attributes: Código de confirmación al email
+        # --username-attributes: El correo es el nombre de usuario
+        # --admin-create-user-config: Permite el autorregistro
+        # --policies: Longitud y complejidad de la contraseña
+        USER_POOL_ID=$(aws cognito-idp create-user-pool \
+            --pool-name "$POOL_NAME" \
+            --auto-verified-attributes email \
+            --username-attributes email \
+            --admin-create-user-config AllowAdminCreateUserOnly=false \
+            --policies '{"PasswordPolicy":{"MinimumLength":8,"RequireUppercase":true,"RequireLowercase":true,"RequireNumbers":true,"RequireSymbols":false}}' \
+            --query "UserPool.Id" \
             --output text)
+        echo "User Pool creado (ID: $USER_POOL_ID)."
 
-        if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
-            echo "Creando App Client para SPA..."
-            # Parámetros:
-            # --user-pool-id: ID del User Pool al que quedara asociado este cliente
-            # --client-name: Nombre descriptivo para la aplicacion cliente (SPA)
-            # --no-generate-secret: Evita crear clave secreta; obligatorio para clientes publicos como SPAs
-            # --allowed-o-auth-flows: Habilita el flujo seguro Authorization Code Grant (OAuth 2.0 con PKCE)
-            # --allowed-o-auth-scopes: Define los permisos solicitados en el token durante el login
-            # --allowed-o-auth-flows-user-pool-client: Activa la configuracion OAuth definida en este cliente
-            # --callback-urls: Lista blanca de URLs a donde Cognito puede redirigir tras un login exitoso
-            # --logout-urls: Lista blanca de URLs a donde Cognito puede redirigir tras cerrar sesion
-            # --supported-identity-providers: Permite autenticacion con el directorio propio de Cognito
-            # --refresh-token-validity: Dias de validez del refresh token (Cognito no usa el scope offline_access)
-            # --query: Extrae unicamente la propiedad "ClientId" de la respuesta JSON
-            # --output: Devuelve la salida como texto plano
-            CLIENT_ID=$(aws cognito-idp create-user-pool-client \
-                --user-pool-id "$USER_POOL_ID" \
-                --client-name "$CLIENT_NAME" \
-                --no-generate-secret \
-                --allowed-o-auth-flows code \
-                --allowed-o-auth-scopes $OAUTH_SCOPES \
-                --allowed-o-auth-flows-user-pool-client \
-                --callback-urls "$CALLBACK_URL" \
-                --logout-urls "$CALLBACK_URL" \
-                --supported-identity-providers COGNITO \
-                --refresh-token-validity "$REFRESH_TOKEN_VALIDITY_DAYS" \
-                --query "UserPoolClient.ClientId" \
-                --output text)
-            echo "App Client creada (ID: $CLIENT_ID)."
-        else
-            echo "App Client '$CLIENT_NAME' ya existe (ID: $CLIENT_ID). Se actualizan callback y refresh token."
-            # Parámetros:
-            # --user-pool-id: ID del User Pool al que pertenece el cliente
-            # --client-id: Identificador del App Client que se va a modificar
-            # --client-name: Nombre descriptivo para la aplicacion cliente (SPA)
-            # --allowed-o-auth-flows: Habilita el flujo seguro Authorization Code Grant (OAuth 2.0 con PKCE)
-            # --allowed-o-auth-scopes: Define los permisos solicitados en el token durante el login
-            # --allowed-o-auth-flows-user-pool-client: Activa la configuracion OAuth definida en este cliente
-            # --callback-urls: Lista blanca de URLs a donde Cognito puede redirigir tras un login exitoso
-            # --logout-urls: Lista blanca de URLs a donde Cognito puede redirigir tras cerrar sesion
-            # --supported-identity-providers: Permite autenticacion con el directorio propio de Cognito
-            # --refresh-token-validity: Dias de validez del refresh token (Cognito no usa el scope offline_access)
-            aws cognito-idp update-user-pool-client \
-                --user-pool-id "$USER_POOL_ID" \
-                --client-id "$CLIENT_ID" \
-                --client-name "$CLIENT_NAME" \
-                --allowed-o-auth-flows code \
-                --allowed-o-auth-scopes $OAUTH_SCOPES \
-                --allowed-o-auth-flows-user-pool-client \
-                --callback-urls "$CALLBACK_URL" \
-                --logout-urls "$CALLBACK_URL" \
-                --supported-identity-providers COGNITO \
-                --refresh-token-validity "$REFRESH_TOKEN_VALIDITY_DAYS" \
-                --query "UserPoolClient.ClientId" \
-                --output text >/dev/null
-            if [ $? -ne 0 ]; then
-                echo "Error al actualizar el App Client '$CLIENT_NAME'."
-                exit 1
-            fi
-        fi
+        echo "Creando dominio de Cognito '$COGNITO_DOMAIN'..."
+        # --domain: Prefijo del Hosted UI, donde el navegador inicia el login.
+        # La respuesta JSON (ManagedLoginVersion) no aporta nada: se descarta.
+        aws cognito-idp create-user-pool-domain \
+            --domain "$COGNITO_DOMAIN" \
+            --user-pool-id "$USER_POOL_ID" \
+            --output text >/dev/null
+        echo "Dominio de Cognito creado."
 
-        if [ -z "$CLIENT_ID" ] || [ "$CLIENT_ID" = "None" ]; then
-            echo "Error: No se obtuvo el Client ID de Cognito."
-            exit 1
-        fi
+        echo "Creando App Client para la SPA..."
+        # --no-generate-secret: Cliente público; el secreto quedaría en el navegador
+        # --allowed-o-auth-flows: Authorization code (con PKCE)
+        # --callback-urls / --logout-urls: Únicas URLs a las que Cognito puede redirigir
+        # --refresh-token-validity: Días de validez del refresh token
+        CLIENT_ID=$(aws cognito-idp create-user-pool-client \
+            --user-pool-id "$USER_POOL_ID" \
+            --client-name "$CLIENT_NAME" \
+            --no-generate-secret \
+            --allowed-o-auth-flows code \
+            --allowed-o-auth-scopes $OAUTH_SCOPES \
+            --allowed-o-auth-flows-user-pool-client \
+            --callback-urls "$CALLBACK_URL" \
+            --logout-urls "$CALLBACK_URL" \
+            --supported-identity-providers COGNITO \
+            --refresh-token-validity "$REFRESH_TOKEN_VALIDITY_DAYS" \
+            --query "UserPoolClient.ClientId" \
+            --output text)
+        echo "App Client creada (ID: $CLIENT_ID)."
 
-        # El dominio OAuth del frontend y el issuer del backend son endpoints distintos:
-        # el primero inicia la autorización y el segundo identifica al emisor de los JWT.
+        # El Hosted UI inicia el login. issuer-uri es quien firma los JWT.
         COGNITO_DOMAIN_URL="https://$COGNITO_DOMAIN.auth.$AWS_REGION.amazoncognito.com"
         ISSUER_URI="https://cognito-idp.$AWS_REGION.amazonaws.com/$USER_POOL_ID"
 
-        # IDs y URLs de Cognito en lab-state.json (POOL_NAME / CLIENT_NAME siguen siendo constantes).
         state_set Region "$AWS_REGION"
         state_set UserPoolId "$USER_POOL_ID"
         state_set ClientId "$CLIENT_ID"
@@ -230,90 +124,53 @@ case "$ACTION" in
         state_set CallbackUrl "$CALLBACK_URL"
         state_set IssuerUri "$ISSUER_URI"
         state_set CognitoDomainUrl "$COGNITO_DOMAIN_URL"
-        echo "Cognito guardado en lab-state.json: Region, UserPoolId, ClientId, Domain, CallbackUrl, IssuerUri, CognitoDomainUrl"
 
         cat > "$CONFIG_FILE" <<EOF
-# .env.local (sufijo .local): git lo ignora. Lo genera aws-scripts/cognito.sh en cada create;
-# no editar a mano. Se carga en todos los modos (dev y build) porque Cognito hace falta en ambos.
-# VITE_COGNITO_ISSUER_URI: emisor de los JWT (User Pool), mismo valor que usa el API
-# VITE_COGNITO_CLIENT_ID: identificador del App Client de la SPA
-# VITE_COGNITO_DOMAIN: URL del Hosted UI para login y logout OAuth
+# Generado por aws-scripts/cognito.sh. No editar a mano.
+# VITE_COGNITO_ISSUER_URI: emisor de los JWT, el mismo valor que usa Spring
+# VITE_COGNITO_CLIENT_ID: App Client de la SPA
+# VITE_COGNITO_DOMAIN: Hosted UI para login y logout
 VITE_COGNITO_ISSUER_URI=$ISSUER_URI
 VITE_COGNITO_CLIENT_ID=$CLIENT_ID
 VITE_COGNITO_DOMAIN=$COGNITO_DOMAIN_URL
 EOF
-        if [ $? -ne 0 ]; then
-            echo "Error al escribir la configuración del frontend: $CONFIG_FILE"
-            exit 1
-        fi
 
         cat > "$SPRING_CONFIG_FILE" <<EOF
-# Generado por aws-scripts/cognito.sh. No editar a mano: se sobrescribe en cada create.
-# spring.security.oauth2.resourceserver.jwt.issuer-uri: emisor de los JWT (User Pool)
+# Generado por aws-scripts/cognito.sh. No editar a mano.
+# Emisor de los JWT (User Pool)
 spring.security.oauth2.resourceserver.jwt.issuer-uri=$ISSUER_URI
 EOF
-        if [ $? -ne 0 ]; then
-            echo "Error al escribir la configuración de Spring Boot: $SPRING_CONFIG_FILE"
-            exit 1
-        fi
 
-        echo "Archivo $CONFIG_FILE actualizado."
-        echo "Archivo $SPRING_CONFIG_FILE actualizado."
+        echo "El User Pool, el App Client y el dominio quedan en estos ficheros. La SPA y Spring los leen al arrancar; no van en el código:"
+        echo "  Frontend (variables de la SPA): $CONFIG_FILE"
+        echo "  Backend (emisor del JWT): $SPRING_CONFIG_FILE"
         echo "Configuración de Cognito finalizada."
         ;;
 
     delete)
-        # No se borra el User Pool ni el dominio si existen: el pool contiene los
-        # usuarios registrados y perderlos no es recuperable. El prefijo del Hosted UI
-        # es único en toda la región; si se elimina, puede quedar reservado un tiempo
-        # o seguir ocupado en otra cuenta del Learner Lab y no se puede volver a crear.
-        # Sí se borran los ficheros locales generados (cognito.properties, .env.local):
-        # el siguiente create los regenera, reutilizando el pool si sigue existiendo.
-        echo "Comprobando el dominio de Cognito '$COGNITO_DOMAIN'..."
-        # Parámetros:
-        # --domain: Prefijo del dominio Hosted UI
-        # --query: Extrae el User Pool ligado a ese dominio
-        # --output: Devuelve el resultado en texto plano
-        DOMAIN_POOL=$(aws cognito-idp describe-user-pool-domain \
-            --domain "$COGNITO_DOMAIN" \
-            --query "DomainDescription.UserPoolId" \
-            --output text 2>/dev/null || true)
+        # IDs de lab-state.json. El dominio se borra antes que el pool.
+        # El App Client desaparece al borrar el pool.
+        USER_POOL_ID=$(state_require UserPoolId)
+        DOMAIN=$(state_require Domain)
 
-        if [ -n "$DOMAIN_POOL" ] && [ "$DOMAIN_POOL" != "None" ]; then
-            echo "Advertencia: el dominio '$COGNITO_DOMAIN' existe (User Pool '$DOMAIN_POOL'). No se elimina."
-        fi
+        echo "Eliminando dominio de Cognito '$DOMAIN'..."
+        aws cognito-idp delete-user-pool-domain \
+            --domain "$DOMAIN" \
+            --user-pool-id "$USER_POOL_ID"
 
-        echo "Comprobando el User Pool '$POOL_NAME'..."
-        # Parámetros:
-        # --max-results: Limita el escaneo a los primeros 60 User Pools registrados en la cuenta
-        # --query: Filtra la lista buscando el elemento con el nombre especificado y obtiene su ID
-        # --output: Devuelve el resultado filtrado como texto plano
-        USER_POOL_ID=$(aws cognito-idp list-user-pools \
-            --max-results 60 \
-            --query "UserPools[?Name=='$POOL_NAME'].Id | [0]" \
-            --output text)
-
-        if [ -n "$USER_POOL_ID" ] && [ "$USER_POOL_ID" != "None" ]; then
-            echo "Advertencia: el User Pool '$POOL_NAME' existe (ID: $USER_POOL_ID). No se elimina."
-        fi
-
-        if { [ -z "$DOMAIN_POOL" ] || [ "$DOMAIN_POOL" = "None" ]; } && \
-           { [ -z "$USER_POOL_ID" ] || [ "$USER_POOL_ID" = "None" ]; }; then
-            echo "No hay dominio ni User Pool en AWS."
-        fi
+        echo "Eliminando User Pool '$USER_POOL_ID' (el App Client se borra con él)..."
+        aws cognito-idp delete-user-pool --user-pool-id "$USER_POOL_ID"
 
         rm -f "$CONFIG_FILE" "$SPRING_CONFIG_FILE"
-        echo "Eliminados ficheros locales de Cognito (si existían):"
-        echo "  $CONFIG_FILE"
-        echo "  $SPRING_CONFIG_FILE"
+
+        tmp=$(mktemp)
+        jq 'del(.Region, .UserPoolId, .ClientId, .Domain, .CallbackUrl, .IssuerUri, .CognitoDomainUrl)' \
+            "$LAB_STATE_FILE" > "$tmp"
+        mv "$tmp" "$LAB_STATE_FILE"
+        echo "Cognito eliminado."
         ;;
 
     *)
-        echo "Uso: $0 {create|delete}"
-        echo ""
-        echo "Ejemplos:"
-        echo "  $0 create"
-        echo "  $0 delete"
-        exit 1
+        usage
         ;;
 esac
