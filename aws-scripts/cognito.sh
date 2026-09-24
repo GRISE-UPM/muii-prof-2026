@@ -28,8 +28,8 @@ usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
-    echo "  $0 create"
-    echo "  $0 delete"
+    echo "  $0 create # Crea el User Pool, el dominio y el App Client"
+    echo "  $0 delete # Borra el dominio y el User Pool; el App Client cae con él"
     exit 1
 }
 
