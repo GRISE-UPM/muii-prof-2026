@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { apiFetch } from "../api.js";
 import ResultadoHttp from "./ResultadoHttp.jsx";
 
-// POST /api/eventos — equivalente a "Introducir evento" en Swagger (rol ADMIN)
-function CrearEvento({ token }) {
+// POST /api/eventos — equivalente a "Introducir evento" en Swagger
+function CrearEvento() {
   const [nombre, setNombre] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [precio, setPrecio] = useState("10");
@@ -13,7 +13,6 @@ function CrearEvento({ token }) {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setResultado(await apiFetch("/api/eventos", {
-      token,
       method: "POST",
       body: {
         nombre,
@@ -27,7 +26,7 @@ function CrearEvento({ token }) {
   return (
     <div className="api-panel">
       <h3>Crear evento</h3>
-      <p className="ruta">POST /api/eventos (requiere rol ADMIN)</p>
+      <p className="ruta">POST /api/eventos</p>
       <form onSubmit={handleSubmit}>
         <label>
           Nombre
