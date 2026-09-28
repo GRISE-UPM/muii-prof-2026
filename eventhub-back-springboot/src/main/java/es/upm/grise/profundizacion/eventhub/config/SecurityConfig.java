@@ -7,7 +7,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -30,7 +29,6 @@ import java.util.List;
  * Define la autenticación OAuth2 y las reglas de autorización por HTTP y rol.
  */
 @Configuration // Indica a Spring que esta clase es una fuente de configuración global
-@EnableMethodSecurity // Habilita la seguridad basada en anotaciones en métodos (ej. @PreAuthorize, @Secured)
 public class SecurityConfig {
 
     /**
