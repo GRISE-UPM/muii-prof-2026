@@ -11,6 +11,9 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
@@ -106,6 +109,16 @@ public class SecurityConfig {
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
         response.getWriter().write("{\"error\":\"" + error + "\",\"mensaje\":\"" + mensaje + "\"}");
+    }
+
+    /**
+     * Acepta solo access tokens. Cognito firma el ID token y el access token con las mismas claves
+     * y el mismo emisor, así que la validación por defecto (firma, emisor y caducidad) aceptaría los dos.
+     * El claim 'token_use' los distingue. Spring Boot añade este validador a los del JwtDecoder.
+     */
+    @Bean
+    public OAuth2TokenValidator<Jwt> tokenUseValidator() {
+        return new JwtClaimValidator<String>("token_use", "access"::equals);
     }
 
     /**
