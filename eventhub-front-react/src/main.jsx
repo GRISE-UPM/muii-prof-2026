@@ -25,6 +25,11 @@ const oidcConfig = {
   
   // URL a la que Cognito redirigirá al usuario tras autenticarse con éxito
   redirect_uri: window.location.origin,
+
+  // Tras el login, Cognito vuelve con ?code=...&state=... en la URL. Una vez
+  // canjeado el código, se quitan de la barra de direcciones: si no, al recargar
+  // la página la librería intentaría canjearlo otra vez y fallaría.
+  onSigninCallback: () => window.history.replaceState({}, document.title, window.location.pathname),
   
   // Uso del flujo recomendado OAuth 2.0 Authorization Code Grant
   response_type: "code",
