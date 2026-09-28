@@ -78,6 +78,8 @@ mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
 El UI queda en `http://localhost:8080/swagger-ui.html`.
 
+En `dev` la base de datos es H2 en memoria, así que no hace falta Aurora ni `aurora.properties`. La consola H2 queda en `http://localhost:8080/h2-console` (JDBC URL `jdbc:h2:mem:eventhubdb`, usuario `sa`, sin contraseña).
+
 ## Ejecutar el frontend localmente
 
 ```bash
