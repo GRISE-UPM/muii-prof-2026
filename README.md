@@ -65,6 +65,8 @@ mvn spring-boot:run -Dspring-boot.run.profiles=dev
 
 El UI queda en `http://localhost:8080/swagger-ui.html`.
 
+El perfil `dev` activa también la consola H2 en `http://localhost:8080/h2-console` (JDBC URL `jdbc:h2:mem:eventhubdb`, usuario `sa`, sin contraseña).
+
 ## Ejecutar el frontend localmente
 
 ```bash
