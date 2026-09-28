@@ -33,7 +33,7 @@ Aplicación para gestionar eventos, compuesta por:
 make deploy
 ```
 
-desde la raíz para crear EC2, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cognito en AWS no se borra: si el User Pool o el dominio ya existen, se reutilizan. `make delete` sí elimina los ficheros locales generados (`.env.local`, `cognito.properties`, etc.); el siguiente `create` los regenera. Para eliminar frontend, backend, configuración local de Cognito, EC2 y el resto de ficheros generados:
+desde la raíz para crear EC2, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cada `make deploy` crea un User Pool, un dominio y un App Client nuevos, y regenera `.env.local` y `cognito.properties`. El prefijo del dominio es fijo para cada cuenta de AWS, así que si Cognito ya existe (porque no se ejecutó `make delete`), `cognito.sh` falla al crear el dominio. Para eliminar Cognito (dominio y User Pool, con su App Client), la instancia EC2 con el backend y el frontend, y los ficheros generados (`lab-state.json`, `.env.local`, `.env.production.local` y `cognito.properties`):
 
 ```bash
 make delete
