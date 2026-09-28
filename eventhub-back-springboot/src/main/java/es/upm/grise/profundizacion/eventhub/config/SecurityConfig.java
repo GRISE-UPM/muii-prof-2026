@@ -50,10 +50,13 @@ public class SecurityConfig {
                 }
             })
 
+            // La consola H2 se pinta en frames del mismo origen
+            .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
+
             // Configuración de autorización basada en endpoints HTTP
             .authorizeHttpRequests(auth -> auth
-                // Permite acceso público sin autenticación a la documentación Swagger/OpenAPI
-                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                // Permite acceso público sin autenticación a la documentación Swagger/OpenAPI y la consola H2
+                .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/h2-console/**").permitAll()
                 
                 // Creación de eventos: Exclusivo para usuarios con rol ADMIN
                 .requestMatchers(HttpMethod.POST, "/api/eventos").hasRole("ADMIN")
