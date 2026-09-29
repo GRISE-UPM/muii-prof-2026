@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Lista los recursos AWS del laboratorio en docs/resources.json.
-# Parte de lab-state.json (ec2.sh y cognito.sh) y completa los datos con describe.
+# Parte de lab-state.json (ec2.sh, cognito.sh) y completa los datos con describe.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -12,7 +12,7 @@ source "$SCRIPT_DIR/../aws-scripts/jq-functions.sh"
 
 OUT_DIR="$PROJECT_ROOT/docs"
 OUT_FILE="$OUT_DIR/resources.json"
-VERSION="2.0.0"
+VERSION="3.0.0"
 
 mkdir -p "$OUT_DIR"
 
@@ -35,6 +35,9 @@ COGNITO_DOMAIN=$(state_require Domain)
 CALLBACK_URL=$(state_require CallbackUrl)
 ISSUER_URI=$(state_require IssuerUri)
 COGNITO_DOMAIN_URL=$(state_require CognitoDomainUrl)
+
+# secrets.sh no guarda el secreto en lab-state.json: su nombre es fijo.
+SECRET_ID="prod/h2/admin"
 
 REGION=$(state_get Region)
 if [ -z "$REGION" ]; then
@@ -68,6 +71,9 @@ CLIENT_JSON=$(aws cognito-idp describe-user-pool-client \
     --output json)
 DOMAIN_JSON=$(aws cognito-idp describe-user-pool-domain --domain "$COGNITO_DOMAIN" --output json)
 
+# describe-secret devuelve los metadatos del secreto, no la password.
+SECRET_JSON=$(aws secretsmanager describe-secret --secret-id "$SECRET_ID" --output json)
+
 SG_NAME=$(echo "$SG_JSON" | jq -r '.SecurityGroups[0].GroupName')
 INSTANCE_TYPE=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].InstanceType')
 INSTANCE_STATE=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].State.Name')
@@ -78,6 +84,7 @@ AZ=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].Placement.Avai
 INSTANCE_SUBNET=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].SubnetId')
 EIP_PUBLIC=$(echo "$EIP_JSON" | jq -r '.Addresses[0].PublicIp')
 EIP_ASSOC=$(echo "$EIP_JSON" | jq -r '.Addresses[0].AssociationId // empty')
+INSTANCE_PROFILE_ARN=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].IamInstanceProfile.Arn // empty')
 
 POOL_NAME=$(echo "$USER_POOL_JSON" | jq -r '.UserPool.Name')
 CLIENT_NAME=$(echo "$CLIENT_JSON" | jq -r '.UserPoolClient.ClientName')
@@ -120,6 +127,8 @@ jq -n \
     --arg cognitoDomainUrl "$COGNITO_DOMAIN_URL" \
     --arg domainStatus "$DOMAIN_STATUS" \
     --argjson userPoolDomain "$DOMAIN_JSON" \
+    --arg instanceProfileArn "$INSTANCE_PROFILE_ARN" \
+    --argjson secret "$SECRET_JSON" \
     '{
       version: $version,
       region: $region,
@@ -170,7 +179,8 @@ jq -n \
             keyName: $keyName,
             availabilityZone: $availabilityZone,
             subnetId: $instanceSubnetId,
-            securityGroupIds: [$groupId]
+            securityGroupIds: [$groupId],
+            iamInstanceProfileArn: $instanceProfileArn
           },
           {
             type: "AWS::EC2::EIP",
@@ -204,6 +214,19 @@ jq -n \
             userPoolId: $userPoolId,
             status: $domainStatus,
             cognitoDomainUrl: $cognitoDomainUrl
+          },
+          {
+            type: "AWS::IAM::InstanceProfile",
+            service: "AWS IAM",
+            id: $instanceProfileArn,
+            instanceId: $instanceId
+          },
+          {
+            type: "AWS::SecretsManager::Secret",
+            service: "AWS Secrets Manager",
+            id: $secret.ARN,
+            name: $secret.Name,
+            owningService: ($secret.OwningService // null)
           }
         ]
       )
