@@ -56,3 +56,8 @@ ehthumbs.db
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+
+# Documentación: se publica desde Overleaf, no desde el repositorio
+docs/*
+!docs/list-resources.sh
+!docs/draw-architecture.py
