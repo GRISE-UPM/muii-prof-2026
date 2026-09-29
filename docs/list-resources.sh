@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Lista los recursos AWS del laboratorio en docs/resources.json.
-# Parte de lab-state.json (ec2.sh y cognito.sh) y completa los datos con describe.
+# Parte de lab-state.json (ec2.sh, cognito.sh y aurora.sh) y completa los datos con describe.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -12,12 +12,12 @@ source "$SCRIPT_DIR/../aws-scripts/jq-functions.sh"
 
 OUT_DIR="$PROJECT_ROOT/docs"
 OUT_FILE="$OUT_DIR/resources.json"
-VERSION="2.0.0"
+VERSION="4.0.0"
 
 mkdir -p "$OUT_DIR"
 
 if [ ! -f "$LAB_STATE_FILE" ]; then
-    echo "Error: no existe $LAB_STATE_FILE. Ejecuta antes: make deploy (o ec2.sh/cognito.sh create)"
+    echo "Error: no existe $LAB_STATE_FILE. Ejecuta antes: make deploy (o ec2.sh/aurora.sh/cognito.sh create)"
     exit 1
 fi
 
@@ -35,6 +35,10 @@ COGNITO_DOMAIN=$(state_require Domain)
 CALLBACK_URL=$(state_require CallbackUrl)
 ISSUER_URI=$(state_require IssuerUri)
 COGNITO_DOMAIN_URL=$(state_require CognitoDomainUrl)
+
+DB_SUBNET_GROUP=$(state_require DBSubnetGroupName)
+DB_CLUSTER_ID=$(state_require DBClusterIdentifier)
+DB_SECRET_ARN=$(state_require SecretArn)
 
 REGION=$(state_get Region)
 if [ -z "$REGION" ]; then
@@ -68,6 +72,16 @@ CLIENT_JSON=$(aws cognito-idp describe-user-pool-client \
     --output json)
 DOMAIN_JSON=$(aws cognito-idp describe-user-pool-domain --domain "$COGNITO_DOMAIN" --output json)
 
+DB_SUBNET_GROUP_JSON=$(aws rds describe-db-subnet-groups \
+    --db-subnet-group-name "$DB_SUBNET_GROUP" --output json)
+DB_CLUSTER_JSON=$(aws rds describe-db-clusters \
+    --db-cluster-identifier "$DB_CLUSTER_ID" --output json)
+# Todas las instancias del clúster, también las creadas a mano o por autoescalado.
+DB_INSTANCES_JSON=$(aws rds describe-db-instances \
+    --filters "Name=db-cluster-id,Values=$DB_CLUSTER_ID" --output json)
+# describe-secret devuelve los metadatos del secreto, no la password.
+SECRET_JSON=$(aws secretsmanager describe-secret --secret-id "$DB_SECRET_ARN" --output json)
+
 SG_NAME=$(echo "$SG_JSON" | jq -r '.SecurityGroups[0].GroupName')
 INSTANCE_TYPE=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].InstanceType')
 INSTANCE_STATE=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].State.Name')
@@ -78,6 +92,7 @@ AZ=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].Placement.Avai
 INSTANCE_SUBNET=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].SubnetId')
 EIP_PUBLIC=$(echo "$EIP_JSON" | jq -r '.Addresses[0].PublicIp')
 EIP_ASSOC=$(echo "$EIP_JSON" | jq -r '.Addresses[0].AssociationId // empty')
+INSTANCE_PROFILE_ARN=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].IamInstanceProfile.Arn // empty')
 
 POOL_NAME=$(echo "$USER_POOL_JSON" | jq -r '.UserPool.Name')
 CLIENT_NAME=$(echo "$CLIENT_JSON" | jq -r '.UserPoolClient.ClientName')
@@ -120,6 +135,11 @@ jq -n \
     --arg cognitoDomainUrl "$COGNITO_DOMAIN_URL" \
     --arg domainStatus "$DOMAIN_STATUS" \
     --argjson userPoolDomain "$DOMAIN_JSON" \
+    --arg instanceProfileArn "$INSTANCE_PROFILE_ARN" \
+    --argjson secret "$SECRET_JSON" \
+    --argjson dbSubnetGroup "$DB_SUBNET_GROUP_JSON" \
+    --argjson dbCluster "$DB_CLUSTER_JSON" \
+    --argjson dbInstances "$DB_INSTANCES_JSON" \
     '{
       version: $version,
       region: $region,
@@ -170,7 +190,8 @@ jq -n \
             keyName: $keyName,
             availabilityZone: $availabilityZone,
             subnetId: $instanceSubnetId,
-            securityGroupIds: [$groupId]
+            securityGroupIds: [$groupId],
+            iamInstanceProfileArn: $instanceProfileArn
           },
           {
             type: "AWS::EC2::EIP",
@@ -204,8 +225,67 @@ jq -n \
             userPoolId: $userPoolId,
             status: $domainStatus,
             cognitoDomainUrl: $cognitoDomainUrl
+          },
+          {
+            type: "AWS::IAM::InstanceProfile",
+            service: "AWS IAM",
+            id: $instanceProfileArn,
+            instanceId: $instanceId
+          },
+          {
+            type: "AWS::SecretsManager::Secret",
+            service: "AWS Secrets Manager",
+            id: $secret.ARN,
+            name: $secret.Name,
+            owningService: ($secret.OwningService // null)
           }
         ]
+        + [
+          {
+            type: "AWS::RDS::DBSubnetGroup",
+            service: "Amazon RDS",
+            id: $dbSubnetGroup.DBSubnetGroups[0].DBSubnetGroupName,
+            vpcId: $dbSubnetGroup.DBSubnetGroups[0].VpcId,
+            subnetIds: ($dbSubnetGroup.DBSubnetGroups[0].Subnets | map(.SubnetIdentifier))
+          },
+          ($dbCluster.DBClusters[0] | {
+            type: "AWS::RDS::DBCluster",
+            service: "Amazon Aurora",
+            id: .DBClusterIdentifier,
+            engine: .Engine,
+            engineVersion: .EngineVersion,
+            status: .Status,
+            endpoint: .Endpoint,
+            readerEndpoint: .ReaderEndpoint,
+            port: .Port,
+            databaseName: .DatabaseName,
+            masterUsername: .MasterUsername,
+            masterUserSecretArn: (.MasterUserSecret.SecretArn // null),
+            dbSubnetGroup: .DBSubnetGroup,
+            securityGroupIds: (.VpcSecurityGroups | map(.VpcSecurityGroupId)),
+            storageEncrypted: .StorageEncrypted,
+            backupRetentionPeriod: .BackupRetentionPeriod,
+            members: (.DBClusterMembers | map({instanceId: .DBInstanceIdentifier, isWriter: .IsClusterWriter, promotionTier: .PromotionTier}))
+          })
+        ]
+        + (
+          ($dbCluster.DBClusters[0].DBClusterMembers
+            | map({key: .DBInstanceIdentifier, value: .IsClusterWriter}) | from_entries) as $writers
+          | $dbInstances.DBInstances
+          | map({
+              type: "AWS::RDS::DBInstance",
+              service: "Amazon Aurora",
+              id: .DBInstanceIdentifier,
+              role: (if $writers[.DBInstanceIdentifier] then "writer" else "reader" end),
+              instanceClass: .DBInstanceClass,
+              status: .DBInstanceStatus,
+              availabilityZone: .AvailabilityZone,
+              promotionTier: .PromotionTier,
+              publiclyAccessible: .PubliclyAccessible,
+              endpoint: (.Endpoint.Address // null),
+              dbClusterIdentifier: .DBClusterIdentifier
+            })
+        )
       )
     }' > "$OUT_FILE"
 
