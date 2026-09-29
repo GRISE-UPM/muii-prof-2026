@@ -19,8 +19,9 @@ replay_pid*
 src/test/java/**/*Test.java
 !src/test/java/**/*SmokeTest.java
 
-# Configuración de Cognito generada por aws-scripts/cognito.sh
+# Configuración generada por aws-scripts (cognito.sh, aurora.sh)
 src/main/resources/cognito.properties
+src/main/resources/aurora.properties
 
 # Maven wrapper descargado
 .mvn/wrapper/maven-wrapper.jar
