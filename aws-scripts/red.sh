@@ -1,0 +1,154 @@
+#!/bin/bash
+
+# Crea o borra la red de eventhub: subnets de la VPC por defecto y los dos grupos de seguridad.
+# Termina en el primer comando que falle y muestra el error de ese comando.
+set -e
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+
+# Funciones para leer/escribir el fichero lab-state.json
+source "$SCRIPT_DIR/jq-functions.sh"
+
+# Constantes. VpcId, SubnetIds, GroupId y AlbGroupId se escriben en lab-state.json al hacer create.
+# eventhub-sg: tareas de ECS y clúster Aurora. eventhub-alb-sg: balanceador de carga.
+SG_NAME="eventhub-sg"
+ALB_SG_NAME="eventhub-alb-sg"
+BACK_PORT=8080
+
+# Lista de prefijos que AWS mantiene con las IP de CloudFront hacia los orígenes
+CLOUDFRONT_PREFIX_LIST="com.amazonaws.global.cloudfront.origin-facing"
+
+usage() {
+    echo "Uso: $0 {create|delete}"
+    echo ""
+    echo "Ejemplos:"
+    echo "  $0 create # Obtiene la VPC y dos subnets, y crea los grupos de seguridad"
+    echo "  $0 delete # Borra los grupos de seguridad"
+    exit 1
+}
+
+if [ -z "$1" ] || [ -n "$2" ]; then
+    usage
+fi
+
+ACTION="$1"
+
+case "$ACTION" in
+    create)
+        echo "Obteniendo la VPC por defecto..."
+
+        # AWS Academy ya tiene una VPC default. Este script no la crea.
+        VPC_ID=$(aws ec2 describe-vpcs \
+            --filters Name=isDefault,Values=true \
+            --query 'Vpcs[0].VpcId' \
+            --output text)
+        if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "Error: No se encontró una VPC por defecto."
+            exit 1
+        fi
+        state_set VpcId "$VPC_ID"
+        echo "VPC por defecto: $VPC_ID"
+
+        echo "Obteniendo subnets de la VPC..."
+
+        # Se guardan dos, en zonas distintas: el balanceador, las tareas y Aurora
+        # exigen al menos dos zonas.
+        ALL_SUBNET_IDS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query 'Subnets[].SubnetId' \
+            --output text)
+        SUBNET_1=$(echo "$ALL_SUBNET_IDS" | awk '{print $1}')
+        SUBNET_2=$(echo "$ALL_SUBNET_IDS" | awk '{print $2}')
+        if [ -z "$SUBNET_1" ] || [ -z "$SUBNET_2" ]; then
+            echo "Error: Hacen falta al menos 2 subnets en la VPC $VPC_ID; encontradas: ${ALL_SUBNET_IDS:-ninguna}"
+            exit 1
+        fi
+        state_set_array SubnetIds "$SUBNET_1" "$SUBNET_2"
+        echo "Subnets: $SUBNET_1 $SUBNET_2"
+
+        echo "Creando el grupo de seguridad del balanceador '$ALB_SG_NAME'..."
+
+        # --vpc-id: el grupo vive en la VPC por defecto
+        ALB_SG_ID=$(aws ec2 create-security-group \
+            --group-name "$ALB_SG_NAME" \
+            --description "Balanceador de eventhub: HTTP solo desde CloudFront" \
+            --vpc-id "$VPC_ID" \
+            --query "GroupId" \
+            --output text)
+        state_set AlbGroupId "$ALB_SG_ID"
+
+        # El balanceador solo acepta tráfico de CloudFront, no de cualquier IP:
+        # a la API solo se llega a través de la distribución.
+        PREFIX_LIST_ID=$(aws ec2 describe-managed-prefix-lists \
+            --filters "Name=prefix-list-name,Values=$CLOUDFRONT_PREFIX_LIST" \
+            --query 'PrefixLists[0].PrefixListId' \
+            --output text)
+        if [ -z "$PREFIX_LIST_ID" ] || [ "$PREFIX_LIST_ID" = "None" ]; then
+            echo "Error: No se encontró la lista de prefijos de CloudFront."
+            exit 1
+        fi
+        aws ec2 authorize-security-group-ingress \
+            --group-id "$ALB_SG_ID" \
+            --ip-permissions "IpProtocol=tcp,FromPort=80,ToPort=80,PrefixListIds=[{PrefixListId=$PREFIX_LIST_ID}]" \
+            --output text >/dev/null
+        echo "Grupo del balanceador creado (ID: $ALB_SG_ID): puerto 80 abierto a CloudFront."
+
+        echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
+
+        SG_ID=$(aws ec2 create-security-group \
+            --group-name "$SG_NAME" \
+            --description "Tareas de ECS y cluster Aurora de eventhub" \
+            --vpc-id "$VPC_ID" \
+            --query "GroupId" \
+            --output text)
+        state_set GroupId "$SG_ID"
+
+        # --source-group: al puerto de Spring Boot solo llega el balanceador.
+        # aurora.sh abre después el 5432 dentro de este mismo grupo.
+        aws ec2 authorize-security-group-ingress \
+            --group-id "$SG_ID" \
+            --protocol tcp \
+            --port "$BACK_PORT" \
+            --source-group "$ALB_SG_ID" \
+            --output text >/dev/null
+        echo "Grupo de las tareas creado (ID: $SG_ID): puerto $BACK_PORT abierto al balanceador."
+
+        echo "La VPC, las subnets y los grupos de seguridad quedan en lab-state.json:"
+        echo "  $LAB_STATE_FILE"
+        echo "Creación de la red finalizada."
+        ;;
+
+    delete)
+
+        # Primero el grupo de las tareas, que tiene una regla que apunta al del balanceador.
+        # Las interfaces de red de las tareas y del balanceador tardan en liberarse
+        # después de borrarlos: si el grupo sigue en uso, se reintenta.
+        # La VPC por defecto no es de este script: no se borra.
+        SG_ID=$(state_require GroupId)
+        ALB_SG_ID=$(state_require AlbGroupId)
+
+        for GROUP in "$SG_ID" "$ALB_SG_ID"; do
+            echo "Eliminando grupo de seguridad '$GROUP'..."
+            for intento in $(seq 1 20); do
+                if aws ec2 delete-security-group --group-id "$GROUP" 2>/dev/null; then
+                    break
+                fi
+                if [ "$intento" -eq 20 ]; then
+                    echo "Error: No se pudo borrar el grupo '$GROUP': sigue en uso."
+                    exit 1
+                fi
+                echo "  El grupo sigue en uso; se reintenta en 15 segundos..."
+                sleep 15
+            done
+        done
+
+        tmp=$(mktemp)
+        jq 'del(.VpcId, .SubnetIds, .GroupId, .AlbGroupId)' "$LAB_STATE_FILE" > "$tmp"
+        mv "$tmp" "$LAB_STATE_FILE"
+        echo "Red eliminada."
+        ;;
+
+    *)
+        usage
+        ;;
+esac

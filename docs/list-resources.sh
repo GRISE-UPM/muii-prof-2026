@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # Lista los recursos AWS del laboratorio en docs/resources.json.
-# Parte de lab-state.json (ec2.sh, cognito.sh y aurora.sh) y completa los datos con describe.
+# Parte de lab-state.json (red.sh, aurora.sh, alb.sh, cloudfront.sh, cognito.sh,
+# ecs.sh y back.sh) y completa los datos con describe.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -12,22 +13,33 @@ source "$SCRIPT_DIR/../aws-scripts/jq-functions.sh"
 
 OUT_DIR="$PROJECT_ROOT/docs"
 OUT_FILE="$OUT_DIR/resources.json"
-VERSION="4.0.0"
+VERSION="5.0.0"
 
 mkdir -p "$OUT_DIR"
 
 if [ ! -f "$LAB_STATE_FILE" ]; then
-    echo "Error: no existe $LAB_STATE_FILE. Ejecuta antes: make deploy (o ec2.sh/aurora.sh/cognito.sh create)"
+    echo "Error: no existe $LAB_STATE_FILE. Ejecuta antes: make deploy"
     exit 1
 fi
 
 VPC_ID=$(state_require VpcId)
-GROUP_ID=$(state_require GroupId)
-INSTANCE_ID=$(state_require InstanceId)
-ALLOCATION_ID=$(state_require AllocationId)
-ASSOCIATION_ID=$(state_get AssociationId)
-PUBLIC_IP=$(state_require PublicIp)
 SUBNET_IDS=$(state_require SubnetIds)
+GROUP_ID=$(state_require GroupId)
+ALB_GROUP_ID=$(state_require AlbGroupId)
+
+ALB_ARN=$(state_require LoadBalancerArn)
+TG_ARN=$(state_require TargetGroupArn)
+LISTENER_ARN=$(state_require ListenerArn)
+
+BUCKET_NAME=$(state_require BucketName)
+OAC_ID=$(state_require OriginAccessControlId)
+DIST_ID=$(state_require DistributionId)
+
+REPOSITORY_URI=$(state_require EcrRepositoryUri)
+CLUSTER_NAME=$(state_require EcsCluster)
+LOG_GROUP=$(state_require LogGroup)
+SERVICE_NAME=$(state_require EcsService)
+TASK_DEF_ARN=$(state_require TaskDefinitionArn)
 
 USER_POOL_ID=$(state_require UserPoolId)
 CLIENT_ID=$(state_require ClientId)
@@ -58,12 +70,53 @@ GENERATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo "Consultando recursos V${VERSION} en $REGION..."
 
 VPC_JSON=$(aws ec2 describe-vpcs --vpc-ids "$VPC_ID" --output json)
-SG_JSON=$(aws ec2 describe-security-groups --group-ids "$GROUP_ID" --output json)
-INSTANCE_JSON=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --output json)
-EIP_JSON=$(aws ec2 describe-addresses --allocation-ids "$ALLOCATION_ID" --output json)
-
 # shellcheck disable=SC2086
 SUBNETS_JSON=$(aws ec2 describe-subnets --subnet-ids $SUBNET_IDS --output json)
+SG_JSON=$(aws ec2 describe-security-groups --group-ids "$ALB_GROUP_ID" "$GROUP_ID" --output json)
+
+ALB_JSON=$(aws elbv2 describe-load-balancers --load-balancer-arns "$ALB_ARN" --output json)
+TG_JSON=$(aws elbv2 describe-target-groups --target-group-arns "$TG_ARN" --output json)
+# Una entrada por tarea registrada, con su IP y su estado de salud.
+TG_HEALTH_JSON=$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --output json)
+LISTENER_JSON=$(aws elbv2 describe-listeners --listener-arns "$LISTENER_ARN" --output json)
+
+# get-distribution-config no devuelve el dominio ni el estado; get-distribution sí.
+DIST_JSON=$(aws cloudfront get-distribution --id "$DIST_ID" --output json)
+OAC_JSON=$(aws cloudfront get-origin-access-control --id "$OAC_ID" --output json)
+BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" \
+    --query LocationConstraint --output text)
+# Fuera de us-east-1 get-bucket-location devuelve la región; en us-east-1, None.
+if [ "$BUCKET_REGION" = "None" ]; then
+    BUCKET_REGION="us-east-1"
+fi
+BUCKET_OBJECTS=$(aws s3api list-objects-v2 --bucket "$BUCKET_NAME" \
+    --query 'KeyCount' --output text)
+
+REPOSITORY_NAME="${REPOSITORY_URI#*/}"
+ECR_JSON=$(aws ecr describe-repositories --repository-names "$REPOSITORY_NAME" --output json)
+ECR_IMAGES_JSON=$(aws ecr describe-images --repository-name "$REPOSITORY_NAME" --output json)
+LOG_GROUP_JSON=$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --output json)
+
+ECS_CLUSTER_JSON=$(aws ecs describe-clusters --clusters "$CLUSTER_NAME" --output json)
+ECS_SERVICE_JSON=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME" --output json)
+TASK_DEF_JSON=$(aws ecs describe-task-definition --task-definition "$TASK_DEF_ARN" --output json)
+TASK_ARNS=$(aws ecs list-tasks --cluster "$CLUSTER_NAME" --service-name "$SERVICE_NAME" \
+    --query 'taskArns[]' --output text)
+if [ -n "$TASK_ARNS" ]; then
+    # shellcheck disable=SC2086
+    TASKS_JSON=$(aws ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks $TASK_ARNS --output json)
+else
+    TASKS_JSON='{"tasks": []}'
+fi
+
+# Rol que usan las tareas (rol de ejecución y rol de la tarea): LabRole en AWS Academy.
+TASK_ROLE_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.taskDefinition.taskRoleArn // empty')
+if [ -n "$TASK_ROLE_ARN" ]; then
+    ROLE_JSON=$(aws iam get-role --role-name "${TASK_ROLE_ARN##*/}" --output json 2>/dev/null \
+        || echo '{"Role": null}')
+else
+    ROLE_JSON='{"Role": null}'
+fi
 
 USER_POOL_JSON=$(aws cognito-idp describe-user-pool --user-pool-id "$USER_POOL_ID" --output json)
 CLIENT_JSON=$(aws cognito-idp describe-user-pool-client \
@@ -82,22 +135,6 @@ DB_INSTANCES_JSON=$(aws rds describe-db-instances \
 # describe-secret devuelve los metadatos del secreto, no la password.
 SECRET_JSON=$(aws secretsmanager describe-secret --secret-id "$DB_SECRET_ARN" --output json)
 
-SG_NAME=$(echo "$SG_JSON" | jq -r '.SecurityGroups[0].GroupName')
-INSTANCE_TYPE=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].InstanceType')
-INSTANCE_STATE=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].State.Name')
-AMI_ID=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].ImageId')
-PRIVATE_IP=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].PrivateIpAddress')
-KEY_NAME=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].KeyName // empty')
-AZ=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].Placement.AvailabilityZone')
-INSTANCE_SUBNET=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].SubnetId')
-EIP_PUBLIC=$(echo "$EIP_JSON" | jq -r '.Addresses[0].PublicIp')
-EIP_ASSOC=$(echo "$EIP_JSON" | jq -r '.Addresses[0].AssociationId // empty')
-INSTANCE_PROFILE_ARN=$(echo "$INSTANCE_JSON" | jq -r '.Reservations[0].Instances[0].IamInstanceProfile.Arn // empty')
-
-POOL_NAME=$(echo "$USER_POOL_JSON" | jq -r '.UserPool.Name')
-CLIENT_NAME=$(echo "$CLIENT_JSON" | jq -r '.UserPoolClient.ClientName')
-DOMAIN_STATUS=$(echo "$DOMAIN_JSON" | jq -r '.DomainDescription.Status // empty')
-
 jq -n \
     --arg version "$VERSION" \
     --arg region "$REGION" \
@@ -106,36 +143,34 @@ jq -n \
     --arg labStateFile "$LAB_STATE_FILE" \
     --arg vpcId "$VPC_ID" \
     --argjson vpc "$VPC_JSON" \
-    --arg groupId "$GROUP_ID" \
-    --arg groupName "$SG_NAME" \
-    --argjson securityGroup "$SG_JSON" \
-    --arg instanceId "$INSTANCE_ID" \
-    --arg instanceType "$INSTANCE_TYPE" \
-    --arg instanceState "$INSTANCE_STATE" \
-    --arg amiId "$AMI_ID" \
-    --arg privateIp "$PRIVATE_IP" \
-    --arg keyName "$KEY_NAME" \
-    --arg availabilityZone "$AZ" \
-    --arg instanceSubnetId "$INSTANCE_SUBNET" \
-    --argjson instance "$INSTANCE_JSON" \
-    --arg allocationId "$ALLOCATION_ID" \
-    --arg associationId "${ASSOCIATION_ID:-$EIP_ASSOC}" \
-    --arg publicIp "${PUBLIC_IP:-$EIP_PUBLIC}" \
-    --argjson elasticIp "$EIP_JSON" \
     --argjson subnets "$SUBNETS_JSON" \
+    --argjson securityGroups "$SG_JSON" \
+    --argjson alb "$ALB_JSON" \
+    --argjson targetGroup "$TG_JSON" \
+    --argjson targetHealth "$TG_HEALTH_JSON" \
+    --argjson listener "$LISTENER_JSON" \
+    --arg bucketName "$BUCKET_NAME" \
+    --arg bucketRegion "$BUCKET_REGION" \
+    --arg bucketObjects "$BUCKET_OBJECTS" \
+    --argjson oac "$OAC_JSON" \
+    --argjson distribution "$DIST_JSON" \
+    --argjson ecr "$ECR_JSON" \
+    --argjson ecrImages "$ECR_IMAGES_JSON" \
+    --argjson logGroups "$LOG_GROUP_JSON" \
+    --argjson ecsCluster "$ECS_CLUSTER_JSON" \
+    --argjson ecsService "$ECS_SERVICE_JSON" \
+    --argjson taskDefinition "$TASK_DEF_JSON" \
+    --argjson tasks "$TASKS_JSON" \
+    --argjson role "$ROLE_JSON" \
     --arg userPoolId "$USER_POOL_ID" \
-    --arg poolName "$POOL_NAME" \
     --arg issuerUri "$ISSUER_URI" \
     --argjson userPool "$USER_POOL_JSON" \
     --arg clientId "$CLIENT_ID" \
-    --arg clientName "$CLIENT_NAME" \
     --arg callbackUrl "$CALLBACK_URL" \
     --argjson userPoolClient "$CLIENT_JSON" \
     --arg domain "$COGNITO_DOMAIN" \
     --arg cognitoDomainUrl "$COGNITO_DOMAIN_URL" \
-    --arg domainStatus "$DOMAIN_STATUS" \
     --argjson userPoolDomain "$DOMAIN_JSON" \
-    --arg instanceProfileArn "$INSTANCE_PROFILE_ARN" \
     --argjson secret "$SECRET_JSON" \
     --argjson dbSubnetGroup "$DB_SUBNET_GROUP_JSON" \
     --argjson dbCluster "$DB_CLUSTER_JSON" \
@@ -167,52 +202,172 @@ jq -n \
               mapPublicIpOnLaunch: .MapPublicIpOnLaunch
             })
         )
+        # Origen de cada regla: rangos IP, lista de prefijos (CloudFront) u otro grupo.
+        + (
+          $securityGroups.SecurityGroups
+          | map({
+              type: "AWS::EC2::SecurityGroup",
+              service: "Amazon EC2",
+              id: .GroupId,
+              name: .GroupName,
+              vpcId: .VpcId,
+              ingress: (
+                .IpPermissions
+                | map({
+                    protocol: .IpProtocol,
+                    fromPort: .FromPort,
+                    toPort: .ToPort,
+                    cidrs: (.IpRanges | map(.CidrIp)),
+                    prefixListIds: (.PrefixListIds | map(.PrefixListId)),
+                    sourceGroupIds: (.UserIdGroupPairs | map(.GroupId))
+                  })
+              )
+            })
+        )
         + [
+          ($alb.LoadBalancers[0] | {
+            type: "AWS::ElasticLoadBalancingV2::LoadBalancer",
+            service: "Elastic Load Balancing",
+            id: .LoadBalancerArn,
+            name: .LoadBalancerName,
+            dnsName: .DNSName,
+            scheme: .Scheme,
+            state: .State.Code,
+            availabilityZones: (.AvailabilityZones | map(.ZoneName)),
+            securityGroupIds: .SecurityGroups
+          }),
+          ($targetGroup.TargetGroups[0] | {
+            type: "AWS::ElasticLoadBalancingV2::TargetGroup",
+            service: "Elastic Load Balancing",
+            id: .TargetGroupArn,
+            name: .TargetGroupName,
+            protocol: .Protocol,
+            port: .Port,
+            targetType: .TargetType,
+            healthCheckPath: .HealthCheckPath,
+            targets: ($targetHealth.TargetHealthDescriptions
+              | map({ip: .Target.Id, port: .Target.Port, availabilityZone: .Target.AvailabilityZone, health: .TargetHealth.State}))
+          }),
+          ($listener.Listeners[0] | {
+            type: "AWS::ElasticLoadBalancingV2::Listener",
+            service: "Elastic Load Balancing",
+            id: .ListenerArn,
+            protocol: .Protocol,
+            port: .Port,
+            targetGroupArn: (.DefaultActions[0].TargetGroupArn // null)
+          }),
           {
-            type: "AWS::EC2::SecurityGroup",
-            service: "Amazon EC2",
-            id: $groupId,
-            name: $groupName,
-            vpcId: $vpcId,
-            ingressPorts: (
-              $securityGroup.SecurityGroups[0].IpPermissions
-              | map({protocol: .IpProtocol, fromPort: .FromPort, toPort: .ToPort})
+            type: "AWS::S3::Bucket",
+            service: "Amazon S3",
+            id: $bucketName,
+            region: $bucketRegion,
+            objectCount: ($bucketObjects | tonumber? // 0)
+          },
+          ($oac.OriginAccessControl | {
+            type: "AWS::CloudFront::OriginAccessControl",
+            service: "Amazon CloudFront",
+            id: .Id,
+            name: .OriginAccessControlConfig.Name,
+            signingBehavior: .OriginAccessControlConfig.SigningBehavior
+          }),
+          ($distribution.Distribution | {
+            type: "AWS::CloudFront::Distribution",
+            service: "Amazon CloudFront",
+            id: .Id,
+            arn: .ARN,
+            domainName: .DomainName,
+            status: .Status,
+            enabled: .DistributionConfig.Enabled,
+            priceClass: .DistributionConfig.PriceClass,
+            origins: (.DistributionConfig.Origins.Items | map({id: .Id, domainName: .DomainName})),
+            behaviors: (
+              [{pathPattern: "*", targetOriginId: .DistributionConfig.DefaultCacheBehavior.TargetOriginId}]
+              + ((.DistributionConfig.CacheBehaviors.Items // []) | map({pathPattern: .PathPattern, targetOriginId: .TargetOriginId}))
             )
-          },
-          {
-            type: "AWS::EC2::Instance",
-            service: "Amazon EC2",
-            id: $instanceId,
-            instanceType: $instanceType,
-            state: $instanceState,
-            imageId: $amiId,
-            privateIp: $privateIp,
-            keyName: $keyName,
-            availabilityZone: $availabilityZone,
-            subnetId: $instanceSubnetId,
-            securityGroupIds: [$groupId],
-            iamInstanceProfileArn: $instanceProfileArn
-          },
-          {
-            type: "AWS::EC2::EIP",
-            service: "Amazon EC2",
-            id: $allocationId,
-            associationId: $associationId,
-            publicIp: $publicIp,
-            instanceId: $instanceId
-          },
+          }),
+          ($ecr.repositories[0] | {
+            type: "AWS::ECR::Repository",
+            service: "Amazon ECR",
+            id: .repositoryName,
+            uri: .repositoryUri,
+            imageTags: ($ecrImages.imageDetails | map(.imageTags // []) | add // [])
+          }),
+          ($logGroups.logGroups[0] | {
+            type: "AWS::Logs::LogGroup",
+            service: "Amazon CloudWatch Logs",
+            id: .logGroupName,
+            retentionInDays: (.retentionInDays // null)
+          }),
+          ($ecsCluster.clusters[0] | {
+            type: "AWS::ECS::Cluster",
+            service: "Amazon ECS",
+            id: .clusterName,
+            arn: .clusterArn,
+            status: .status,
+            runningTasksCount: .runningTasksCount
+          }),
+          ($taskDefinition.taskDefinition | {
+            type: "AWS::ECS::TaskDefinition",
+            service: "Amazon ECS",
+            id: .taskDefinitionArn,
+            family: .family,
+            revision: .revision,
+            cpu: .cpu,
+            memory: .memory,
+            cpuArchitecture: (.runtimePlatform.cpuArchitecture // null),
+            executionRoleArn: .executionRoleArn,
+            taskRoleArn: .taskRoleArn,
+            image: .containerDefinitions[0].image
+          }),
+          ($ecsService.services[0] | {
+            type: "AWS::ECS::Service",
+            service: "Amazon ECS",
+            id: .serviceName,
+            arn: .serviceArn,
+            status: .status,
+            launchType: .launchType,
+            desiredCount: .desiredCount,
+            runningCount: .runningCount,
+            taskDefinition: .taskDefinition,
+            subnetIds: .networkConfiguration.awsvpcConfiguration.subnets,
+            securityGroupIds: .networkConfiguration.awsvpcConfiguration.securityGroups,
+            assignPublicIp: .networkConfiguration.awsvpcConfiguration.assignPublicIp,
+            targetGroupArns: (.loadBalancers | map(.targetGroupArn))
+          })
+        ]
+        # Tareas en marcha: cambian con cada despliegue, cada fallo y cada escalado.
+        + (
+          $tasks.tasks
+          | map({
+              type: "AWS::ECS::Task",
+              service: "Amazon ECS",
+              id: .taskArn,
+              lastStatus: .lastStatus,
+              healthStatus: .healthStatus,
+              availabilityZone: .availabilityZone,
+              taskDefinitionArn: .taskDefinitionArn,
+              privateIp: ([.attachments[]?.details[]? | select(.name == "privateIPv4Address") | .value][0] // null)
+            })
+        )
+        + [
+          ($role.Role // {} | {
+            type: "AWS::IAM::Role",
+            service: "AWS IAM",
+            id: (.Arn // null),
+            name: (.RoleName // null)
+          }),
           {
             type: "AWS::Cognito::UserPool",
             service: "Amazon Cognito",
             id: $userPoolId,
-            name: $poolName,
+            name: $userPool.UserPool.Name,
             issuerUri: $issuerUri
           },
           {
             type: "AWS::Cognito::UserPoolClient",
             service: "Amazon Cognito",
             id: $clientId,
-            name: $clientName,
+            name: $userPoolClient.UserPoolClient.ClientName,
             userPoolId: $userPoolId,
             callbackUrl: $callbackUrl,
             callbackUrls: ($userPoolClient.UserPoolClient.CallbackURLs // []),
@@ -223,14 +378,8 @@ jq -n \
             service: "Amazon Cognito",
             id: $domain,
             userPoolId: $userPoolId,
-            status: $domainStatus,
+            status: ($userPoolDomain.DomainDescription.Status // null),
             cognitoDomainUrl: $cognitoDomainUrl
-          },
-          {
-            type: "AWS::IAM::InstanceProfile",
-            service: "AWS IAM",
-            id: $instanceProfileArn,
-            instanceId: $instanceId
           },
           {
             type: "AWS::SecretsManager::Secret",
@@ -238,9 +387,7 @@ jq -n \
             id: $secret.ARN,
             name: $secret.Name,
             owningService: ($secret.OwningService // null)
-          }
-        ]
-        + [
+          },
           {
             type: "AWS::RDS::DBSubnetGroup",
             service: "Amazon RDS",

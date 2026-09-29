@@ -58,6 +58,9 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 // Permite acceso público sin autenticación a la documentación Swagger/OpenAPI y la consola H2
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/h2-console/**").permitAll()
+
+                // Comprobación de salud del balanceador: sin autenticación
+                .requestMatchers("/actuator/health/**").permitAll()
                 
                 // Creación de eventos: Exclusivo para usuarios con rol ADMIN
                 .requestMatchers(HttpMethod.POST, "/api/eventos").hasRole("ADMIN")

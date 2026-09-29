@@ -1,0 +1,3 @@
+# Docker solo necesita el JAR: el resto del proyecto no entra en el contexto de construcción
+*
+!target/*.jar

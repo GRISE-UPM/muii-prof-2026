@@ -10,7 +10,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
 
-# Constantes. GroupId y SubnetIds los escribió ec2.sh en lab-state.json.
+# Constantes. GroupId y SubnetIds los escribió red.sh en lab-state.json.
 # DBSubnetGroupName, DBClusterIdentifier, DBInstanceIdentifiers, SecretArn y
 # Endpoint se escriben en lab-state.json al hacer create.
 # La contraseña master la genera Aurora en Secrets Manager.
@@ -86,7 +86,7 @@ case "$ACTION" in
 
         echo "Abriendo el puerto PostgreSQL $DB_PORT en '$SG_ID'..."
 
-        # --source-group: solo los miembros del grupo pueden conectar a Aurora
+        # --source-group: solo los miembros del grupo (las tareas del backend) pueden conectar a Aurora
         aws ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \
             --protocol tcp \

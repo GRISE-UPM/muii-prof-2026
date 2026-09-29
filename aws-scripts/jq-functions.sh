@@ -4,8 +4,7 @@
 # Uso: source "$SCRIPT_DIR/jq-functions.sh"
 # El JSON se va poblando a medida que cada script hace create (no hace falta
 # un esquema completo desde el principio). Claves alineadas con la API de AWS
-# (GroupId, InstanceId, AllocationId, VpcId, SubnetIds, ...). PublicIp se
-# guarda por comodidad; tambien se obtiene con describe-addresses.
+# (VpcId, SubnetIds, GroupId, LoadBalancerArn, DistributionId, ...).
 # Los valores escalares son strings; listas (p. ej. SubnetIds) son arrays JSON.
 # state_get / state_require aplanan arrays a una sola linea separada por espacios.
 LAB_STATE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

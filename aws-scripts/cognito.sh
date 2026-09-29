@@ -65,9 +65,10 @@ case "$ACTION" in
             fi
         done
 
-        # Callback HTTPS de la SPA. PublicIp lo dejó ec2.sh en lab-state.json.
-        PUBLIC_IP=$(state_require PublicIp)
-        CALLBACK_URL="https://${PUBLIC_IP}"
+        # Callback HTTPS de la SPA: el dominio de CloudFront. DistributionDomain lo
+        # dejó cloudfront.sh en lab-state.json.
+        DIST_DOMAIN=$(state_require DistributionDomain)
+        CALLBACK_URL="https://${DIST_DOMAIN}"
         echo "Callback de Cognito: $CALLBACK_URL"
         echo "Dominio de Cognito: $COGNITO_DOMAIN"
 

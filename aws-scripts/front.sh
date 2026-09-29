@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Compila la SPA y la publica en /var/www/html de la instancia.
-# No tiene delete: el build desaparece con la instancia.
+# Compila la SPA, la sube al bucket S3 y renueva la caché de CloudFront.
+# No tiene delete: el bucket se vacía y se borra con cloudfront.sh delete.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
@@ -10,19 +10,12 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 
 # Funciones para leer/escribir el fichero lab-state.json
 source "$SCRIPT_DIR/jq-functions.sh"
-KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 APP_PATH="$PROJECT_ROOT/eventhub-front-react"
 
-# Ruta absoluta: el lote SFTP se encuentra aunque el comando no se lance desde la raíz.
-SFTP_BATCH_FILE="$SCRIPT_DIR/sftp-batch-file.txt"
-
-# PublicIp lo dejó ec2.sh en lab-state.json.
-PUBLIC_IP=$(state_require PublicIp)
-
-if [ ! -f "$KEY_PATH" ]; then
-    echo "Error: No se encontró la clave SSH en: $KEY_PATH"
-    exit 1
-fi
+# BucketName, DistributionId y DistributionDomain los escribió cloudfront.sh en lab-state.json.
+BUCKET_NAME=$(state_require BucketName)
+DIST_ID=$(state_require DistributionId)
+DIST_DOMAIN=$(state_require DistributionDomain)
 
 if [ ! -d "$APP_PATH" ]; then
     echo "Error: No se encontró el directorio del código fuente en: $APP_PATH"
@@ -30,10 +23,12 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 # Vite solo carga este fichero con npm run build, no con npm run dev.
+# La SPA y la API comparten origen (CloudFront reenvía /api/* al balanceador),
+# así que la SPA llama a rutas relativas: VITE_API_BASE_URL queda vacía.
 cat > "$APP_PATH/.env.production.local" <<EOF
 # Generado por aws-scripts/front.sh. No editar a mano.
-# VITE_API_BASE_URL: origen HTTPS de la API en EC2
-VITE_API_BASE_URL=https://$PUBLIC_IP
+# VITE_API_BASE_URL: vacía; la API está en el mismo origen que la SPA (CloudFront)
+VITE_API_BASE_URL=
 EOF
 
 echo "Compilando la aplicación React..."
@@ -52,33 +47,22 @@ if [ ! -d "$BUILD_DIR" ]; then
     exit 1
 fi
 
-echo "Subiendo el frontend a $PUBLIC_IP..."
-cat << EOF > "$SFTP_BATCH_FILE"
-mkdir /tmp/app_dist
-cd /tmp/app_dist
-lcd $BUILD_DIR
-put -r .
-quit
-EOF
+echo "Subiendo el frontend al bucket '$BUCKET_NAME'..."
 
-# -b: ejecuta el lote SFTP. -i: clave SSH de AWS Academy.
-sftp -o StrictHostKeyChecking=no -b "$SFTP_BATCH_FILE" -i "$KEY_PATH" ubuntu@"$PUBLIC_IP"
+# --delete: borra del bucket los ficheros que ya no están en el build
+aws s3 sync "$BUILD_DIR" "s3://$BUCKET_NAME" --delete
 
-echo "Publicando los ficheros en /var/www/html..."
+echo "Renovando la caché de CloudFront..."
 
-# -T: sin pseudo-terminal, para que no avise al leer el script por stdin
-ssh -T -o StrictHostKeyChecking=no -i "$KEY_PATH" ubuntu@"$PUBLIC_IP" << 'ENDSSH'
-set -e
+# CloudFront guarda copias de los ficheros en el edge. La invalidación obliga a
+# pedirlos de nuevo al bucket, para que se vea la versión recién subida.
+INVALIDATION_ID=$(aws cloudfront create-invalidation \
+    --distribution-id "$DIST_ID" \
+    --paths "/*" \
+    --query 'Invalidation.Id' \
+    --output text)
+aws cloudfront wait invalidation-completed --distribution-id "$DIST_ID" --id "$INVALIDATION_ID"
 
-# Sustituye la página de carga de nginx.sh por el frontend compilado.
-sudo rm -rf /var/www/html/*
-sudo mv /tmp/app_dist/* /var/www/html/
-sudo rm -rf /tmp/app_dist
-sudo chown -R www-data:www-data /var/www/html
-ENDSSH
-
-rm -f "$SFTP_BATCH_FILE"
-
-echo "El build queda en la instancia, servido por Nginx. No va en el repositorio:"
-echo "  https://$PUBLIC_IP/"
+echo "El build queda en el bucket, servido por CloudFront. No va en el repositorio:"
+echo "  https://$DIST_DOMAIN/"
 echo "Despliegue del frontend finalizado."
