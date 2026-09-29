@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/jq-functions.sh"
 SG_NAME="eventhub-sg"
 KEY_NAME="vockey"
 INSTANCE_TYPE="t2.micro"
+INSTANCE_PROFILE="LabInstanceProfile"
 
 usage() {
     echo "Uso: $0 {create|delete}"
@@ -100,11 +101,14 @@ case "$ACTION" in
 
         # --key-name: par vockey de AWS Academy, para el SSH de los despliegues
         # --instance-type: t2.micro, el tamaño del laboratorio
+        # --iam-instance-profile: rol LabRole de AWS Academy. Spring Boot lo usa
+        # para leer el secreto en Secrets Manager.
         INSTANCE_ID=$(aws ec2 run-instances \
             --image-id "$AMI_ID" \
             --count 1 \
             --instance-type "$INSTANCE_TYPE" \
             --key-name "$KEY_NAME" \
+            --iam-instance-profile Name="$INSTANCE_PROFILE" \
             --security-group-ids "$SG_ID" \
             --query "Instances[0].InstanceId" \
             --output text)
