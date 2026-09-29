@@ -367,62 +367,6 @@ public List<EventoResponseDTO> buscarEventos(String nombre) {
 
 Como el driver se conecta a los \textit{endpoints} de instancia usando la topología, no depende del \textit{endpoint} de lectura ni de su reparto por DNS.
 
-\section{Integración con Spring Boot}\label{sec:spring}
-
-El backend declara el driver JDBC de AWS (\textit{AWS Advanced JDBC Wrapper}), junto con el driver base en el que se apoya%
-\endnote{El driver JDBC de AWS no es un driver completo: envuelve a otro driver JDBC, que es el que habla el protocolo de la base de datos, y le añade funcionalidad mediante \textit{plugins}. Aurora PostgreSQL usa el protocolo de PostgreSQL (no existe un driver específico de Aurora), así que el driver base es el de PostgreSQL (\texttt{org.postgresql:postgresql}). Por eso el \texttt{pom.xml} declara las dos dependencias, y en la URL \texttt{jdbc:aws-wrapper:postgresql://}\ldots{} la parte \texttt{postgresql} indica al driver de AWS qué driver base usar.}%
-, y el \textit{starter} de Spring Cloud AWS para Secrets Manager. H2 queda restringido a los tests (\texttt{scope=test}), de modo que \texttt{mvn test} no necesita Aurora.
-
-\begin{lstlisting}[language=XML,basicstyle=\ttfamily\footnotesize]
-<!-- Driver base que usa aws-advanced-jdbc-wrapper -->
-<dependency>
-    <groupId>org.postgresql</groupId>
-    <artifactId>postgresql</artifactId>
-    <scope>runtime</scope>
-</dependency>
-<!-- Driver JDBC de AWS: lecturas a las réplicas y failover rápido -->
-<dependency>
-    <groupId>software.amazon.jdbc</groupId>
-    <artifactId>aws-advanced-jdbc-wrapper</artifactId>
-    <version>${aws-advanced-jdbc-wrapper.version}</version>
-    <scope>runtime</scope>
-</dependency>
-<dependency>
-    <groupId>io.awspring.cloud</groupId>
-    <artifactId>spring-cloud-aws-starter-secrets-manager</artifactId>
-</dependency>
-\end{lstlisting}
-
-\vspace{1em}
-
-La versión del driver de AWS (4.4.0) se fija en la propiedad \texttt{\seqsplit{aws-advanced-jdbc-wrapper.version}} del \texttt{pom.xml}, porque Spring Boot no la gestiona. La versión del \textit{starter} la fija el BOM \texttt{\seqsplit{spring-cloud-aws-dependencies}} (4.1.0), compatible con Spring Boot 4.1. El \textit{starter} registra un \texttt{\seqsplit{ConfigDataLocationResolver}} que reconoce el prefijo \texttt{\seqsplit{aws-secretsmanager:}}.
-
-Las claves de nivel superior del JSON del secreto (\texttt{username} y \texttt{password}) se convierten en propiedades del entorno de Spring. No es necesario \texttt{\seqsplit{spring.cloud.aws.region.static}}: el SDK usa \texttt{\seqsplit{DefaultAwsRegionProviderChain}} (\texttt{AWS\_REGION}, \texttt{\seqsplit{\textasciitilde/.aws/config}} o metadatos de EC2).
-
-\texttt{application.properties} no nombra el secreto de RDS ni el \textit{endpoint}. Importa el fichero generado:
-
-\begin{lstlisting}[language=properties,basicstyle=\ttfamily\footnotesize]
-spring.config.import=classpath:cognito.properties,classpath:aurora.properties
-
-spring.datasource.username=${username}
-spring.datasource.password=${password}
-spring.datasource.driver-class-name=software.amazon.jdbc.Driver
-spring.datasource.url=jdbc:aws-wrapper:postgresql://${aurora.host}:${aurora.port}/${aurora.dbname}?wrapperPlugins=readWriteSplitting,failover2,efm2
-
-spring.jpa.hibernate.ddl-auto=update
-\end{lstlisting}
-
-\vspace{1em}
-
-\begin{itemize}
-    \item \texttt{spring.config.import}: \texttt{classpath:cognito.properties} aporta el emisor JWT; \texttt{classpath:aurora.properties} aporta los datos de conexión y, a su vez, importa con \texttt{aws-secretsmanager:} el secreto \texttt{rds!cluster-\ldots} que creó RDS.
-    \item \texttt{spring.datasource.username=\$\{username\}}: mapea la clave \texttt{username} del secreto a la propiedad estándar de Spring Boot. Igual para \texttt{password}.
-    \item \texttt{\seqsplit{spring.datasource.driver-class-name}} y \texttt{\seqsplit{spring.datasource.url}}: la clase es la del driver de AWS (\texttt{\seqsplit{software.amazon.jdbc.Driver}}), y la URL empieza por \texttt{\seqsplit{jdbc:aws-wrapper:}}. Se construye con \texttt{aurora.host}, \texttt{aurora.port} y \texttt{\seqsplit{aurora.dbname}}, que proceden de \texttt{\seqsplit{aurora.properties}}, no del secreto. Es una única URL, dirigida al \textit{endpoint} del clúster, a partir de la cual el driver reparte las lecturas y las escrituras (sección~\ref{sec:endpoints}).
-    \item \texttt{spring.jpa.hibernate.ddl-auto=update}: Hibernate crea o altera tablas (\texttt{evento}, \texttt{compra}) al arrancar.
-\end{itemize}
-
-Spring Boot lee el secreto al arrancar, así que la EC2 necesita credenciales de AWS con permiso para invocar \texttt{\seqsplit{secretsmanager:GetSecretValue}} sobre el secreto \texttt{\seqsplit{rds!cluster-\ldots}}. En AWS Academy no se pueden crear roles: el laboratorio incluye el rol \texttt{LabRole} y su perfil de instancia \texttt{\seqsplit{LabInstanceProfile}}, que \texttt{ec2.sh} asocia a la instancia al crearla (\texttt{\seqsplit{--iam-instance-profile\ Name=LabInstanceProfile}}). El SDK de AWS obtiene esas credenciales de los metadatos de la instancia; no se guardan en disco. Sin el perfil, la importación \texttt{\seqsplit{aws-secretsmanager:}} falla y la aplicación no arranca. La conexión JDBC con Aurora no usa IAM: la controla el grupo de seguridad (puerto 5432).
-
 \section{Disponibilidad}\label{sec:disponibilidad}
 
 Esta sección describe qué papel desempeña cada tipo de instancia del clúster, qué ocurre cuando falla y cómo afecta al tiempo de respuesta.
