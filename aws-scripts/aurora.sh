@@ -86,7 +86,7 @@ case "$ACTION" in
 
         echo "Abriendo el puerto PostgreSQL $DB_PORT en '$SG_ID'..."
 
-        # --source-group: solo la instancia del mismo grupo puede conectar a Aurora
+        # --source-group: solo los miembros del grupo pueden conectar a Aurora
         aws ec2 authorize-security-group-ingress \
             --group-id "$SG_ID" \
             --protocol tcp \
