@@ -45,7 +45,7 @@ make delete
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
 - `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
-- `eventhub-back-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot.
+- `eventhub-back-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot y datos de conexión (`aurora.host`, `aurora.port`, `aurora.dbname`).
 
 Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-back-springboot/src/main/resources/`.
 
@@ -55,11 +55,11 @@ El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el 
 
 - `aws rds create-db-cluster --manage-master-user-password` hace que Aurora genere la contraseña y el secreto: no se escribe a mano ni viaja por la CLI.
 - El nombre del secreto lo asigna RDS (`rds!cluster-...`), por lo que `aurora.sh` lo consulta y lo escribe en `aurora.properties`.
-- El JSON del secreto contiene `username`, `password`, `host`, `port` y `dbname`, con los que Spring Boot construye `jdbc:postgresql://${host}:${port}/${dbname}`.
+- El JSON del secreto gestionado por RDS solo contiene `username` y `password`. El endpoint del clúster lo devuelve `create-db-cluster` y `aurora.sh` lo escribe en `aurora.properties`; Spring Boot construye `jdbc:aws-wrapper:postgresql://${aurora.host}:${aurora.port}/${aurora.dbname}` con el driver JDBC de AWS, que envía las transacciones de solo lectura a la réplica.
 - Aurora es accesible solo desde la VPC: `aurora.sh` abre el puerto 5432 en el grupo de seguridad de EC2 y únicamente para el tráfico de ese mismo grupo.
 - Los tests no necesitan AWS: `src/test/resources/application.properties` arranca H2 en memoria con credenciales fijas.
 
-`make delete` elimina la instancia, el clúster y su subnet group; RDS se encarga de retirar el secreto.
+`make delete` elimina las dos instancias, el clúster y su subnet group; RDS se encarga de retirar el secreto.
 
 ## La aplicación estará disponible en
 
