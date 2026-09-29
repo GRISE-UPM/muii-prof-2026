@@ -70,6 +70,7 @@ case "$ACTION" in
         echo "Creando el Origin Access Control..."
 
         # OAC: CloudFront firma sus peticiones al bucket; nadie más puede leerlo.
+        # SigningBehavior=always: firma todas las peticiones, sin excepción
         OAC_ID=$(aws cloudfront create-origin-access-control \
             --origin-access-control-config "Name=eventhub-oac-${AWS_ACCOUNT_ID},SigningProtocol=sigv4,SigningBehavior=always,OriginAccessControlOriginType=s3" \
             --query 'OriginAccessControl.Id' \
@@ -78,10 +79,13 @@ case "$ACTION" in
 
         echo "Creando la distribución de CloudFront..."
 
+        # CallerReference: valor único; si la petición se repite, no crea otra distribución.
         # Dos orígenes:
         #   s3-front: la SPA (comportamiento por defecto), cacheada en el edge
         #   alb-api: /api/*, sin caché y con todos los métodos HTTP
         # http-only: el balanceador no tiene certificado; el HTTPS lo pone CloudFront.
+        # redirect-to-https: una petición HTTP a la SPA se redirige a HTTPS.
+        # https-only: la API rechaza HTTP (un POST redirigido perdería su cuerpo).
         # PriceClass_100: solo ubicaciones de Norteamérica y Europa, las más baratas.
         DIST_CONFIG=$(mktemp)
         jq -n \

@@ -43,8 +43,10 @@ case "$ACTION" in
 
         echo "Creando el balanceador '$ALB_NAME'..."
 
+        # --type application: balanceador de capa 7 (HTTP)
         # --scheme internet-facing: CloudFront llega a él por Internet
         # --subnets: dos zonas; $SUBNET_IDS va sin comillas a propósito (dos argumentos)
+        # --security-groups: eventhub-alb-sg, que solo admite a CloudFront
         ALB_INFO=$(aws elbv2 create-load-balancer \
             --name "$ALB_NAME" \
             --type application \
@@ -62,8 +64,10 @@ case "$ACTION" in
 
         echo "Creando el grupo de destino '$TARGET_GROUP_NAME'..."
 
+        # --port: puerto de Spring Boot en cada tarea
         # --target-type ip: Fargate registra cada tarea por su IP privada
-        # --health-check-*: una tarea que no responde deja de recibir peticiones
+        # --health-check-*: una consulta cada 15 s; 2 aciertos seguidos dan la tarea
+        #   por sana, y 3 fallos, por enferma: deja de recibir peticiones
         TG_ARN=$(aws elbv2 create-target-group \
             --name "$TARGET_GROUP_NAME" \
             --protocol HTTP \
@@ -81,6 +85,7 @@ case "$ACTION" in
         echo "Creando el listener HTTP:80..."
 
         # HTTP y no HTTPS: el certificado lo pone CloudFront (ver cloudfront.sh)
+        # --default-actions forward: todo lo que llega al puerto 80 va al grupo de destino
         LISTENER_ARN=$(aws elbv2 create-listener \
             --load-balancer-arn "$ALB_ARN" \
             --protocol HTTP \

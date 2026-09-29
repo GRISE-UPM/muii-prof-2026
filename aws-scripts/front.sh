@@ -56,6 +56,7 @@ echo "Renovando la caché de CloudFront..."
 
 # CloudFront guarda copias de los ficheros en el edge. La invalidación obliga a
 # pedirlos de nuevo al bucket, para que se vea la versión recién subida.
+# --paths "/*": todos los ficheros de la distribución
 INVALIDATION_ID=$(aws cloudfront create-invalidation \
     --distribution-id "$DIST_ID" \
     --paths "/*" \

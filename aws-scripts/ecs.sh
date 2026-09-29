@@ -48,6 +48,7 @@ case "$ACTION" in
         echo "Creando el grupo de logs '$LOG_GROUP'..."
 
         # Las tareas envían aquí la salida de Spring Boot (driver awslogs).
+        # --retention-in-days: los logs se borran solos pasada una semana
         aws logs create-log-group --log-group-name "$LOG_GROUP"
         aws logs put-retention-policy \
             --log-group-name "$LOG_GROUP" \

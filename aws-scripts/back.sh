@@ -87,6 +87,7 @@ cd - > /dev/null
 echo "Subiendo la imagen a ECR..."
 
 # El registro es la parte del URI anterior a la primera barra.
+# get-login-password: contraseña temporal de ECR; docker login la lee de la entrada estándar.
 REGISTRY="${REPOSITORY_URI%%/*}"
 aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
 docker push "$IMAGE_URI"
@@ -94,6 +95,9 @@ docker push "$IMAGE_URI"
 echo "Registrando la definición de tarea '$TASK_FAMILY'..."
 
 # awsvpc: cada tarea tiene su propia interfaz de red en una subnet de la VPC.
+# executionRoleArn: rol de ECS para descargar la imagen y escribir los logs.
+# taskRoleArn: rol de la aplicación para leer el secreto de Aurora.
+# runtimePlatform: la arquitectura con la que se construyó la imagen.
 # awslogs: la salida de Spring Boot va al grupo de logs de CloudWatch.
 TASK_DEF=$(mktemp)
 jq -n \
@@ -145,6 +149,7 @@ if [ -z "$(state_get EcsService)" ]; then
     #   de las tareas. assignPublicIp: la VPC por defecto no tiene NAT, y las
     #   tareas necesitan salir a Internet (ECR, Secrets Manager, Cognito).
     # --load-balancers: ECS registra cada tarea en el grupo de destino del balanceador.
+    # --health-check-grace-period-seconds: margen para que arranque Spring Boot.
     aws ecs create-service \
         --cluster "$CLUSTER_NAME" \
         --service-name "$SERVICE_NAME" \

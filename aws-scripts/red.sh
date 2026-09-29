@@ -79,6 +79,8 @@ case "$ACTION" in
 
         # El balanceador solo acepta tráfico de CloudFront, no de cualquier IP:
         # a la API solo se llega a través de la distribución.
+        # AWS mantiene la lista de prefijos con las IP de CloudFront; aquí solo se
+        # busca su identificador (pl-...).
         PREFIX_LIST_ID=$(aws ec2 describe-managed-prefix-lists \
             --filters "Name=prefix-list-name,Values=$CLOUDFRONT_PREFIX_LIST" \
             --query 'PrefixLists[0].PrefixListId' \
@@ -87,6 +89,9 @@ case "$ACTION" in
             echo "Error: No se encontró la lista de prefijos de CloudFront."
             exit 1
         fi
+
+        # --ip-permissions: forma larga de la regla, la única que admite una lista
+        # de prefijos como origen
         aws ec2 authorize-security-group-ingress \
             --group-id "$ALB_SG_ID" \
             --ip-permissions "IpProtocol=tcp,FromPort=80,ToPort=80,PrefixListIds=[{PrefixListId=$PREFIX_LIST_ID}]" \
@@ -95,6 +100,7 @@ case "$ACTION" in
 
         echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
 
+        # El mismo grupo alojará después el clúster Aurora (aurora.sh)
         SG_ID=$(aws ec2 create-security-group \
             --group-name "$SG_NAME" \
             --description "Tareas de ECS y cluster Aurora de eventhub" \
