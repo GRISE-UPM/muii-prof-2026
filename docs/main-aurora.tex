@@ -67,12 +67,14 @@
 \begin{abstract}
 Este documento presenta la arquitectura de Amazon Aurora, un motor relacional
 compatible con MySQL y PostgreSQL que separa la capa de cómputo de una capa de
-almacenamiento distribuida y replicada. Tras describir su modelo de
-almacenamiento, sus mecanismos de alta disponibilidad y sus opciones de
-seguridad, se detalla su aplicación en \proyecto: el despliegue automatizado de
-un clúster Aurora PostgreSQL mediante la CLI de AWS, la gestión de la
-contraseña maestra con AWS Secrets Manager sin que esta transite por la línea
-de comandos y la integración del clúster con un \textit{backend} Spring Boot.
+almacenamiento distribuida y replicada. Tras describir ese modelo, se detalla su
+aplicación en \proyecto: el despliegue automatizado de un clúster Aurora
+PostgreSQL mediante la CLI de AWS, con una instancia de escritura y una réplica
+en zonas de disponibilidad distintas, y la gestión de la contraseña maestra con
+AWS Secrets Manager sin que esta transite por la línea de comandos. Por último,
+se analizan los \textit{endpoints} del clúster, el reparto de lecturas y
+escrituras con el driver JDBC de AWS, y la disponibilidad y la escalabilidad del
+clúster.
 \end{abstract}
 
 {
@@ -84,7 +86,7 @@ de comandos y la integración del clúster con un \textit{backend} Spring Boot.
 
 Conectar una aplicación Spring Boot a una base de datos relacional no es nada nuevo: hasta ahora \proyecto~usaba H2, y pasar a MySQL o PostgreSQL consistiría en añadir el driver JDBC y cambiar la URL, el usuario y la contraseña. Aurora no es distinta en ese aspecto. Si nos limitamos a crear un clúster con una instancia y a apuntar la URL JDBC a su \textit{endpoint}, Aurora es una base de datos más: el código Java de la aplicación (entidades, repositorios y servicios) no cambia respecto a H2.
 
-La diferencia aparece cuando la aplicación tiene que cumplir requisitos de tolerancia a fallos, disponibilidad y escalabilidad. Con un poco de configuración, sin programar nada nuevo, Aurora mantiene réplicas que sustituyen a la instancia de escritura si esta falla, sin pérdida de datos, y distribuye automáticamente las lecturas (no las escrituras) entre las réplicas, lo que permite atender más peticiones simultáneamente.
+La diferencia aparece cuando la aplicación tiene que cumplir requisitos de tolerancia a fallos, disponibilidad y escalabilidad. Con un poco de configuración, sin programar nada nuevo, Aurora mantiene réplicas que sustituyen a la instancia de escritura si esta falla, sin pérdida de datos. Además, con el driver JDBC de AWS, las lecturas (no las escrituras) se reparten entre las réplicas, lo que permite atender más peticiones simultáneamente.
 
 \section{Amazon Aurora}\label{sec:aurora}
 
@@ -346,13 +348,13 @@ Las aplicaciones no se conectan a una instancia concreta, sino a un nombre DNS (
     \item \textbf{\textit{Endpoints} de instancia}: \texttt{\seqsplit{eventhub-aurora-writer.}}\ldots{} y \texttt{\seqsplit{eventhub-aurora-reader.}}\ldots{} Apuntan a una instancia concreta, sea cual sea su papel en cada momento.
 \end{itemize}
 
-\paragraph{Usar los \textit{endpoints} directamente.} Cada \textit{endpoint} puede usarse por separado, con el driver estándar de PostgreSQL y una URL \texttt{\seqsplit{jdbc:postgresql://}}\ldots{}, pero entonces es la aplicación la que tiene que decidir a cuál se conecta, esto es, por qué endpoint envía los comandos SQL de lectura y por cual los de escritura. Por el contrario, si la aplicación usa solo endpoint del clúster, todos los comandos SQL, de lectura y de escritura, van a la instancia de escritura, y las réplicas no se aprovechan. 
+\paragraph{Usar los \textit{endpoints} directamente.} Cada \textit{endpoint} puede usarse por separado, con el driver estándar de PostgreSQL y una URL \texttt{\seqsplit{jdbc:postgresql://}}\ldots{}, pero entonces es la aplicación la que tiene que decidir a cuál se conecta, esto es, por qué endpoint envía los comandos SQL de lectura y por cuál los de escritura. Por el contrario, si la aplicación usa solo el \textit{endpoint} del clúster, todos los comandos SQL, de lectura y de escritura, van a la instancia de escritura, y las réplicas no se aprovechan. 
 
 Además, el \textit{endpoint} de lectura no es un balanceador de carga. Es un nombre DNS que, cada vez que se resuelve, devuelve la dirección de una de las réplicas, rotando entre ellas (\textit{round-robin}) con un \textit{Time To Live} (TTL) de 5 segundos. Se reparten \textbf{conexiones}, no consultas: una vez abierta, todas las consultas de una conexión van a la misma réplica. El reparto tampoco tiene en cuenta la carga de cada réplica. 
 
 \paragraph{El driver JDBC de AWS.} \proyecto~usa otra opción: el driver JDBC de AWS, que reparte las lecturas y las escrituras entre las instancias sin que la aplicación tenga que elegir a qué \textit{endpoint} se conecta. Le basta una única URL, la del \textit{endpoint} del clúster. 
 
-El driver no analiza las consultas: lo que ve es que Spring marca la conexión como de solo lectura al empezar una transacción \texttt{@Transactional(readOnly = true)}, y la desmarca al terminar. Con esa señal, el driver envía la transacción a una réplica; el resto de transacciones van a la instancia de escritura. Por ejemplo, en \proyecto~. el\texttt{EventoService} marca la búsqueda de eventos:
+El driver no analiza las consultas: lo que ve es que Spring marca la conexión como de solo lectura al empezar una transacción \texttt{@Transactional(readOnly = true)}, y la desmarca al terminar. Con esa señal, el driver envía la transacción a una réplica; el resto de transacciones van a la instancia de escritura. Por ejemplo, en \proyecto, \texttt{EventoService} marca la búsqueda de eventos:
 
 \begin{lstlisting}[language=Java,basicstyle=\ttfamily\footnotesize]
 @Transactional(readOnly = true)
@@ -379,11 +381,11 @@ La instancia de escritura acepta escrituras (\texttt{INSERT}, \texttt{UPDATE}, \
 
 \begin{itemize}
     \item \textbf{\textit{Failover}}. Aurora promueve una réplica a instancia de escritura (sección~\ref{sec:instancias}); si hay varias, elige según su \texttt{--promotion-tier} (sección~\ref{sec:dos-zonas}). El proceso suele terminar en menos de 60 segundos, y a menudo en menos de 30. Con una sola instancia no habría réplica que promover: Aurora tendría que crear otra, lo que suele llevar menos de 10 minutos, pero sin garantía.
-    \item \textbf{Los papeles cambian, los nombres no}. Tras un \textit{failover}, \texttt{\seqsplit{eventhub-aurora-reader}} pasa a ser la instancia de escritura, y \texttt{\seqsplit{eventhub-aurora-writer}}, cuando se recupera, vuelve como réplica. El \textit{endpoint} del clúster sigue teniendo el mismo nombre, pero apunta a la nueva instancia de escritura.
+    \item \textbf{Los papeles cambian, los nombres no}. Tras un \textit{failover}, \texttt{\seqsplit{eventhub-aurora-reader}} pasa a ser la instancia de escritura, y \texttt{\seqsplit{eventhub-aurora-writer}}, cuando se recupera, vuelve como réplica. Los nombres de las instancias, y los de sus \textit{endpoints} de instancia, no cambian, así que ya no indican el papel de cada una. Una aplicación que enviase sus escrituras al \textit{endpoint} de \texttt{\seqsplit{eventhub-aurora-writer}} fallaría tras el \textit{failover}: esa instancia es ahora una réplica y rechaza las escrituras con un error del tipo \texttt{cannot execute INSERT in a read-only transaction}. Por eso las escrituras no deben dirigirse a una instancia por su nombre, sino al \textit{endpoint} del clúster, que siempre apunta a la instancia de escritura actual.
+    \item \textbf{La caché DNS puede enviar escrituras a la antigua instancia de escritura}. Incluso usando el \textit{endpoint} del clúster puede ocurrir lo mismo durante unos segundos. La aplicación no resuelve ese nombre en cada conexión: lo resuelve una vez y guarda la dirección obtenida durante el TTL (5 segundos; la JVM puede guardarla más tiempo). Si el \textit{failover} ocurre en ese intervalo, el DNS ya apunta a la nueva instancia de escritura, pero la aplicación sigue conectándose a la dirección que tiene guardada, la de \texttt{\seqsplit{eventhub-aurora-writer}}. Mientras esa instancia se reinicia, las conexiones fallan; cuando vuelve como réplica, las acepta, pero rechaza las escrituras. El problema desaparece solo cuando caduca la caché y la aplicación vuelve a preguntar al DNS. El driver JDBC de AWS evita este problema: no depende del DNS, sino que pregunta al clúster cuál es la instancia de escritura.
     \item \textbf{Si cae toda la zona}, la réplica está en la otra y el \textit{failover} funciona igual. Por eso el script coloca las dos instancias en zonas distintas (sección~\ref{sec:instancias}).
     \item \textbf{Los datos no se pierden}: están en la capa de almacenamiento, replicados en tres zonas, independientemente de dónde estén las instancias.
-    \item \textbf{El \textit{failover} no es transparente para la aplicación}. Durante esos segundos, las conexiones abiertas fallan y las transacciones en curso se abortan. El \textit{endpoint} del clúster es un nombre DNS que pasa a apuntar a la nueva instancia de escritura, con un TTL de 5 segundos. El driver JDBC de AWS no espera a que caduque: el \textit{plugin} \texttt{failover2} detecta la nueva instancia de escritura consultando la topología del clúster, y \texttt{efm2} (\textit{enhanced failure monitoring}) vigila la instancia a la que está conectada cada conexión para detectar antes que ha caído. El \textit{pool} de conexiones de Spring Boot (HikariCP) descarta las conexiones rotas y abre otras nuevas.
-    \item \textbf{La caché de la instancia promovida}. La réplica tiene en memoria las páginas que ha usado para sus lecturas, no las de la instancia de escritura, así que tras el \textit{failover} las primeras consultas pueden ser más lentas. Aurora PostgreSQL permite que la réplica mantenga su caché al día con la de la instancia de escritura (\textit{cluster cache management}). Se activa con un parámetro del clúster.
+    \item \textbf{La caché de la instancia promovida}. La réplica tiene en memoria las páginas que ha usado para sus lecturas, no las de la instancia de escritura, así que tras el \textit{failover} las primeras consultas pueden ser más lentas.
 \end{itemize}
 
 Todo lo anterior protege frente a la caída de una zona, no de una región entera. Para eso, Aurora ofrece \textit{Global Database}, que replica el clúster en otras regiones de AWS con un retraso habitualmente inferior a un segundo y permite promover una de ellas si falla la región principal. \proyecto~no la usa.
@@ -394,16 +396,16 @@ Aurora tampoco protege al resto de la aplicación. Hay una sola instancia EC2, e
 
 \begin{itemize}
     \item \textbf{Las escrituras no se ralentizan por tener una réplica}. Cada escritura ya se guarda en la capa de almacenamiento, con copias en tres zonas. La réplica no participa en ese camino: solo recibe de la instancia de escritura, de forma asíncrona, los cambios que necesita para actualizar su caché.
-    \item \textbf{La latencia depende de la zona de la EC2}. Una consulta entre la EC2 y la instancia de escritura en la misma zona tarda del orden de décimas de milisegundo en ir y volver; entre zonas distintas, del orden de un milisegundo. Hibernate lanza varias consultas por petición, así que la diferencia es de milisegundos. \texttt{ec2.sh} no elige la zona de la EC2, y tras un \textit{failover} la instancia de escritura cambia de zona.
+    \item \textbf{La latencia depende de la zona de la EC2}. Una consulta entre la EC2 y la instancia de escritura en la misma zona tarda del orden de décimas de milisegundo en ir y volver; entre zonas distintas, del orden de un milisegundo. Hibernate lanza varias consultas por petición, así que la diferencia es de milisegundos.
 \end{itemize}
 
 \subsection{Las Réplicas de Lectura}\label{sec:readers}
 
-Una réplica de lectura solo atiende lecturas: un intento de escritura falla con un error del tipo \texttt{cannot execute INSERT in a read-only transaction}. No escribe en el almacenamiento; la instancia de escritura le envía el flujo de cambios para que actualice las páginas que tiene en memoria.
+Una réplica de lectura solo atiende lecturas: un intento de escritura falla con un error del tipo \texttt{cannot execute INSERT in a read-only transaction}. La instancia de escritura le envía el flujo de cambios de forma asíncrona para que actualice las páginas que tiene en memoria.
 
 \begin{itemize}
     \item \textbf{Las réplicas van por detrás}. Por ese envío de cambios, una réplica va normalmente menos de 100 milisegundos por detrás de la instancia de escritura. Si un usuario compra una entrada e inmediatamente consulta sus compras en una réplica, puede no ver la compra. Las lecturas que deben ver lo recién escrito tienen que ir a la instancia de escritura, es decir, no marcarse como de solo lectura (sección~\ref{sec:endpoints}).
-    \item \textbf{Si falla una réplica}, no hay \textit{failover}: la instancia de escritura sigue atendiendo escrituras y los datos están en la capa de almacenamiento, así que la disponibilidad no se ve afectada. Aurora reinicia la réplica y, mientras tanto, las conexiones que el driver tenía abiertas con ella fallan; en la siguiente transacción de solo lectura, el driver abre una conexión con otra réplica, o con la instancia de escritura si no queda ninguna. Lo que se pierde es escalabilidad: hasta que la réplica se recupera, sus lecturas recaen en las demás instancias. En \proyecto, con una sola réplica, todas las lecturas vuelven a la instancia de escritura.
+    \item \textbf{Si falla una réplica}, no hay \textit{failover}: la instancia de escritura sigue atendiendo escrituras y los datos están en la capa de almacenamiento, así que la disponibilidad no se ve afectada. Aurora reinicia la réplica y, mientras tanto, las conexiones que el driver tenía abiertas con ella fallan; en la siguiente transacción de solo lectura, el driver abre una conexión con otra réplica, o con la instancia de escritura si no queda ninguna.
 \end{itemize}
 
 \section{Escalabilidad}\label{sec:escalabilidad}
@@ -414,15 +416,15 @@ En Aurora, las lecturas y las escrituras escalan de forma distinta. Las lecturas
 
 La mayoría de las aplicaciones leen mucho más de lo que escriben; en \proyecto, por ejemplo, listar eventos es mucho más frecuente que comprar. Por eso la forma habitual de escalar un clúster Aurora es añadir réplicas de lectura. Como una réplica no es una copia de los datos, sino una instancia más conectada al volumen compartido (sección~\ref{sec:aurora}), añadirla o quitarla es una operación ligera. Puede hacerse a mano o de forma automática, y en los dos casos la réplica se integra en el clúster del mismo modo.
 
-\paragraph{Añadir y quitar réplicas a mano.} Las réplicas pueden crearse y borrarse libremente mientras el clúster está en marcha. Una réplica nueva se crea con \texttt{\seqsplit{create-db-instance}} indicando el clúster al que pertenece (sección~\ref{sec:dos-zonas}), y se borra con \texttt{\seqsplit{delete-db-instance}}. Al crearla conviene elegir su zona con \texttt{\seqsplit{--availability-zone}}, por la misma razón que en la sección~\ref{sec:instancias}: que las instancias no se concentren en una sola zona. Crearla no obliga a copiar datos: tarda los minutos que cuesta arrancar la instancia, sea cual sea el tamaño de la base de datos. Ni crear ni borrar una réplica afecta a la instancia de escritura. Borrar la instancia de escritura es distinto: provoca un \textit{failover} (sección~\ref{sec:writer}).
+\paragraph{Añadir y quitar réplicas a mano.} Las réplicas pueden crearse y borrarse libremente mientras el clúster está en marcha. Una réplica nueva se crea con \texttt{\seqsplit{create-db-instance}} indicando el clúster al que pertenece (sección~\ref{sec:dos-zonas}), y se borra con \texttt{\seqsplit{delete-db-instance}}. Al crearla conviene elegir su zona con \texttt{\seqsplit{--availability-zone}}, por la misma razón que en la sección~\ref{sec:instancias}: que las instancias no se concentren en una sola zona. Crearla no obliga a copiar datos, ya que los datos están disponibles en el clúster y la instancia puede acceder a ellos en cuanto arranca, independientemente del tamaño de la base de datos.
 
-\paragraph{Autoescalado.} \textit{Aurora Auto Scaling} hace lo mismo de forma automática. Se le indica un número mínimo y máximo de réplicas y una métrica que vigilar, por ejemplo la CPU media de las réplicas o el número de conexiones, y añade réplicas cuando la carga sube y las quita cuando baja. Así el número de réplicas, y con él el coste, sigue a la demanda sin intervención manual.
+\paragraph{Autoescalado.} \textit{Aurora Auto Scaling} hace lo mismo de forma automática. Se configura sobre el clúster, en cualquier momento, indicando un número mínimo y máximo de réplicas y una métrica que vigilar, por ejemplo la CPU media de las réplicas o el número de conexiones. Aurora añade réplicas cuando la carga sube y las quita cuando baja. Así el número de réplicas, y con él el coste, sigue a la demanda sin intervención manual.
 
 \paragraph{Cómo se integran las réplicas.} Tanto si se añaden a mano como con autoescalado, la integración es casi transparente:
 
 \begin{itemize}
     \item \textbf{En el clúster} no hay que configurar nada. El \textit{endpoint} de lectura (sección~\ref{sec:endpoints}) incluye la réplica nueva en cuanto está \texttt{available}, y deja de devolver la que se borra.
-    \item \textbf{En la aplicación}, con el driver JDBC de AWS, tampoco hay que cambiar la configuración ni reiniciar nada. El driver descubre las réplicas nuevas cuando refresca la topología del clúster, lo que hace periódicamente (por defecto, cada 30 segundos). Solo las usan las conexiones con réplica que se abren después: las conexiones del \textit{pool} que ya tenían una réplica asignada siguen con ella hasta que se renuevan (sección~\ref{sec:endpoints}).
+    \item \textbf{En la aplicación}, con el driver JDBC de AWS, tampoco hay que cambiar la configuración ni reiniciar nada. El driver descubre las réplicas nuevas cuando refresca la topología del clúster, lo que hace periódicamente (por defecto, cada 30 segundos). Solo las usan las conexiones con réplica que se abren después: las conexiones del \textit{pool} que ya tenían una réplica asignada siguen con ella hasta que se renuevan.
     \item \textbf{Al borrar una réplica}, la transacción de solo lectura que estuviera en curso en ella falla, y la aplicación recibe el error. En la siguiente, el driver abre una conexión con otra réplica, o con la instancia de escritura si no queda ninguna. Es lo mismo que ocurre cuando una réplica falla (sección~\ref{sec:readers}).
 \end{itemize}
 
@@ -441,16 +443,16 @@ En la práctica, el límite suele aparecer antes por el coste: cada réplica es 
 Todas las escrituras van a la única instancia de escritura, así que las réplicas no ayudan con ellas. Antes de actuar conviene medir dónde está el cuello de botella; a menudo no es la base de datos, sino la aplicación. Si lo son las escrituras, hay tres opciones que no añaden ningún elemento a la arquitectura:
 
 \begin{itemize}
-    \item \textbf{Escalado vertical}: cambiar la clase de la instancia (\texttt{\seqsplit{aws\ rds\ modify-db-instance\ --db-instance-class}}) por una mayor. Las clases de memoria optimizada (\texttt{db.r7g.*}, por ejemplo) llegan a decenas de vCPU y cientos de GiB de RAM. El cambio reinicia la instancia; para evitar la interrupción, se cambia primero la réplica y después se provoca un \textit{failover} hacia ella.
-    \item \textbf{Aurora Serverless v2}: las instancias \texttt{db.serverless} ajustan su capacidad a la carga, entre un mínimo y un máximo de ACU (\textit{Aurora Capacity Units}; una ACU equivale a unos 2 GiB de RAM con su CPU y red correspondientes), sin reiniciarse. Encaja con picos de demanda, como la apertura de ventas de un concierto.
+    \item \textbf{Escalado vertical}: cambiar la clase de la instancia (\texttt{\seqsplit{aws\ rds\ modify-db-instance\ --db-instance-class}}) por una mayor. Las clases de memoria optimizada (\texttt{db.r7g.*}, por ejemplo) llegan a decenas de vCPU y cientos de GiB de RAM. 
+    
+    \item \textbf{Aurora Serverless v2}: en lugar de una clase fija, como \texttt{db.t3.medium}, la instancia usa la clase \texttt{db.serverless}, y su tamaño cambia solo según la carga. El tamaño se mide en ACU (\textit{Aurora Capacity Units}; una ACU equivale a unos 2 GiB de RAM con su CPU y red correspondientes), y para el clúster se fija un mínimo y un máximo, por ejemplo entre 0,5 y 16 ACU. Aurora sube o baja la capacidad en pasos pequeños y en cuestión de segundos, sin reiniciar la instancia ni cortar las conexiones. Se paga por las ACU consumidas en cada momento, no por una instancia de tamaño fijo, así que sale a cuenta cuando la carga varía mucho, como en la apertura de ventas de un concierto; con una carga alta y constante, una instancia de clase fija suele ser más barata.
+
+    A diferencia del autoescalado de réplicas del apartado anterior, que añade instancias y solo reparte las lecturas, Serverless v2 hace más grande o más pequeña la propia instancia, y por eso también sirve para la de escritura. Un mismo clúster puede combinar instancias de los dos tipos, por ejemplo una instancia de escritura \texttt{db.serverless} y réplicas de clase fija.
+    
     \item \textbf{Optimizar las consultas}: añadir índices, evitar el problema de las N+1 consultas de Hibernate o agrupar escrituras en lotes. A menudo es lo que más rendimiento aporta con menos coste.
 \end{itemize}
 
 Cuando ni así basta, hay que introducir elementos nuevos en la arquitectura (un \textit{proxy} de conexiones, colas o el reparto de los datos entre varias bases de datos), que quedan fuera de este documento.
-
-\section{Conclusión}
-
-Amazon Aurora ofrece una arquitectura relacional de clase empresarial: almacenamiento distribuido y replicado, cómputo independiente del disco y failover automático cuando el clúster dispone de réplicas. En \proyecto~esa arquitectura se concreta en un clúster Aurora PostgreSQL con una instancia de escritura y una réplica en zonas de disponibilidad distintas, cuya contraseña genera el propio RDS al crear el clúster (\texttt{--manage-master-user-password}), de modo que la clave no transita por la CLI. El nombre del secreto lo asigna AWS; \texttt{aurora.sh} lo deja, junto con el \textit{endpoint} del clúster, en \texttt{aurora.properties} para que Spring Boot monte el \textit{datasource} sin credenciales en el repositorio. El grupo de seguridad de la EC2, transmitido por \texttt{lab-state.json}, aísla el puerto 5432 al interior de la VPC. El resultado es un entorno alineado con las prácticas de secretos, red y persistencia exigibles en una aplicación desplegada en AWS, en el que la base de datos resiste la caída de una instancia o de una zona completa. El siguiente paso hacia la alta disponibilidad no está en Aurora, sino en la EC2, que sigue siendo un punto único de fallo.
 
 \bibliographystyle{plainnat}
 \bibliography{main}
