@@ -1,0 +1,119 @@
+\documentclass[12pt,a4paper]{article}
+
+% --- PAQUETES DE CONFIGURACIÓN ---
+\usepackage[spanish]{babel}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\setlength{\emergencystretch}{1em} % margen extra para evitar desbordes
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{endnotes}
+\usepackage{amsmath}
+\usepackage{seqsplit}
+\usepackage[numbers]{natbib}
+\usepackage{hyperref} % hyperref se carga en último lugar
+
+% --- CONFIGURACIÓN DE APARIENCIA PARA CÓDIGO ---
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codeblue}{rgb}{0,0,0.8}
+\definecolor{backcolour}{rgb}{0.96,0.96,0.96}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{codeblue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{red},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    literate=
+        {á}{{\'a}}1
+        {é}{{\'e}}1
+        {í}{{\'i}}1
+        {ó}{{\'o}}1
+        {ú}{{\'u}}1
+        {ñ}{{\~n}}1
+}
+\lstset{style=mystyle}
+
+\lstdefinelanguage{properties}{
+  sensitive=false,
+  morecomment=[l]{\#},
+  morecomment=[l]{!}
+}
+
+% --- DATOS DEL DOCUMENTO ---
+\title{Amazon Aurora: Acciones Complejas de Escalabilidad}
+\date{\normalsize\today}
+
+\input{datos_proyecto}
+
+\begin{document}
+
+\maketitle
+
+\section{Introducción}
+
+El documento sobre Amazon Aurora describe cómo escala \proyecto~sin añadir ningún elemento a la arquitectura: réplicas de lectura, el driver JDBC de AWS para enviarles las lecturas y, si hace falta, una instancia de escritura más potente u optimizar las consultas. Hay que tener presente una limitación de partida: \textbf{un clúster Aurora PostgreSQL tiene una única instancia de escritura}. Las réplicas añaden capacidad de lectura, no de escritura.
+
+Cuando esas acciones no bastan, hay que introducir un elemento arquitectónico nuevo. Las acciones de este documento se diferencian entre sí en cuánto obligan a cambiar la aplicación, y están ordenadas de menor a mayor impacto. Antes de aplicar cualquiera de ellas conviene medir dónde está el cuello de botella: en la arquitectura actual, lo más probable es que el primero sea la única instancia EC2, no Aurora.
+
+\section{RDS Proxy}
+
+Es un proxy gestionado que se sitúa entre la aplicación y Aurora y mantiene un conjunto de conexiones a la base de datos que comparten todos los clientes. Resuelve un problema distinto al de las consultas: con muchas instancias de la aplicación (o con funciones Lambda), el límite suele ser el número de conexiones que admite Aurora. También acorta el \textit{failover}. Es el más transparente de los elementos nuevos: para la aplicación solo cambia el \textit{host} de la URL. Pero hay que crearlo, darle acceso al secreto y pagarlo.
+
+\section{Caché}
+
+Guardar en memoria los datos que cambian poco (el catálogo de eventos, por ejemplo) evita consultas a la base de datos. \textbf{No es transparente}:
+
+\begin{itemize}
+    \item Hay que marcar en el código qué se cachea (\texttt{@Cacheable} en Spring) y cuándo se invalida (\texttt{@CacheEvict}).
+    \item Hay que decidir cuánto tiempo se tolera un dato desactualizado. El aforo de un evento, por ejemplo, no debería leerse de la caché al comprar.
+    \item Una caché local (en la memoria de cada instancia de la aplicación) no añade infraestructura, pero con varias EC2 cada una tendría su propia versión de los datos. Una caché compartida, como Amazon ElastiCache (Redis), resuelve eso a cambio de un servicio más.
+\end{itemize}
+
+ElastiCache tampoco es transparente: no se sitúa delante de Aurora interceptando consultas, sino que es un almacén en memoria en el que la aplicación decide qué guarda y qué lee. Lo que sí es casi transparente es el paso de una caché local a ElastiCache cuando la aplicación ya usa la abstracción de caché de Spring. Las anotaciones no cambian; basta con añadir la dependencia \texttt{spring-boot-starter-data-redis} y configurar el servidor:
+
+\begin{lstlisting}[language=properties,basicstyle=\ttfamily\footnotesize]
+spring.cache.type=redis
+spring.data.redis.host=eventhub-cache.xxxxxx.cache.amazonaws.com
+spring.data.redis.port=6379
+\end{lstlisting}
+
+\vspace{1em}
+
+Quedan tres diferencias: los objetos cacheados salen de la JVM, así que deben poder serializarse (por ejemplo, a JSON); cada acceso a la caché es una llamada de red, más rápida que una consulta a la base de datos pero más lenta que la memoria local; y el clúster de ElastiCache vive en la VPC, así que hay que abrir su puerto en el grupo de seguridad, igual que el 5432 de Aurora.
+
+La única caché realmente transparente es la interna de Aurora (\textit{buffer cache}), que funciona sin hacer nada.
+
+\section{Colas para las Escrituras}
+
+Encolar las compras (por ejemplo, en Amazon SQS) y procesarlas al ritmo que aguante la instancia de escritura absorbe los picos. Cambia el comportamiento de la aplicación: la compra deja de confirmarse al instante y pasa a estar ``en proceso'', de modo que el \textit{frontend} tiene que consultar después el resultado.
+
+\section{Repartir las Escrituras (Particionado)}
+
+Cuando una sola instancia de escritura no basta, ni siquiera siendo la más grande, hay que repartir los datos entre varias, de modo que cada una escriba solo una parte (\textit{sharding}):
+
+\begin{itemize}
+    \item \textbf{Aurora PostgreSQL Limitless Database} reparte las tablas entre varios fragmentos (\textit{shards}), cada uno con su instancia de escritura, detrás de un enrutador. La aplicación sigue viendo una sola base de datos, pero hay que elegir la clave de reparto de cada tabla, y las consultas que cruzan fragmentos son más costosas.
+    \item \textbf{Una base de datos por servicio}: si la aplicación se divide en microservicios (eventos, pagos, correos), cada uno puede tener su propio clúster y escalar por separado. Es un cambio de diseño de la aplicación, no solo de infraestructura.
+    \item \textbf{Otra tecnología} para la parte con más escrituras, como Amazon DynamoDB, que escala las escrituras horizontalmente por diseño, a cambio de reescribir el acceso a datos.
+\end{itemize}
+
+\section{Un Límite que no Resuelve la Infraestructura}
+
+En \proyecto, el punto más disputado sería el aforo: todas las compras de un evento muy demandado actualizan la misma fila, y se bloquean entre sí. Ni más réplicas ni más instancias de escritura resuelven ese bloqueo; hace falta cambiar el diseño, por ejemplo repartiendo el aforo en cupos o procesando las compras de cada evento en una cola.
+
+\end{document}
