@@ -1,78 +1,9 @@
-# Event Hub
+# Event Hub. Ejercicio de seguridad con Amazon Cognito
 
-Aplicación para gestionar eventos, compuesta por:
+Este repositorio contiene el código de partida de un ejercicio guiado sobre autenticación y autorización con **Amazon Cognito**. Está basado en la versión 1.0.0 de *eventhub*, una aplicación para gestionar eventos formada por un back Spring Boot (`eventhub-back-springboot`), un front React/Vite (`eventhub-front-react`) y los scripts de despliegue en AWS (`aws-scripts`).
 
-- `eventhub-back-springboot`: API REST Spring Boot con JPA, H2, seguridad OAuth2/JWT y OpenAPI.
-- `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT.
-- `aws-scripts`: scripts para desplegar una instancia EC2, configurar Nginx, crear Cognito y publicar el backend y el frontend.
+En la versión 1.0.0 la API no distingue usuarios. Cualquiera puede crear eventos, consultarlos y comprar entradas, y para comprar basta con escribir un email cualquiera en la petición. En el ejercicio se protege la aplicación con Cognito. La autenticación (saber quién es el usuario) se resuelve con OpenID Connect y recae en el front, que delega el login en Cognito y recibe a cambio los tokens. La autorización (decidir qué puede hacer) se resuelve con OAuth 2.0 y recae en el back, que actúa como servidor de recursos, comprueba el token de cada petición y decide según el rol del usuario. Los roles salen de los grupos de Cognito.
 
-## Requisitos
+El tutorial explica el ejercicio paso a paso, y es lo que hay que seguir para realizarlo:
 
-### Instala y configura:
-
-- Java 21 o superior
-- Maven 3.9 o superior
-- Node.js y npm
-- Python 3
-- AWS CLI
-
-### Configura las credenciales de AWS:
-
-- Descarga las credenciales desde AWS Academy y almacénalas en ~/aws/credentials
-- Descarga la SSH key y almacénala en ssh-key/
-
-## Configuración inicial
-
-- Asigna permiso de ejecución a los ficheros .sh en aws-scripts/
-
-## Despliegue con Make
-
-- Ejecuta
-
-```bash
-make deploy
-```
-
-desde la raíz para crear EC2, configurar Nginx, crear Cognito y publicar backend y frontend. Si una fase falla, el despliegue se detiene. Cada `make deploy` crea un User Pool, un dominio y un App Client nuevos, y regenera `.env.local` y `cognito.properties`. El prefijo del dominio es fijo para cada cuenta de AWS, así que si Cognito ya existe (porque no se ejecutó `make delete`), `cognito.sh` falla al crear el dominio. Para eliminar Cognito (dominio y User Pool, con su App Client), la instancia EC2 con el backend y el frontend, y los ficheros generados (`lab-state.json`, `.env.local`, `.env.production.local` y `cognito.properties`):
-
-```bash
-make delete
-```
-
-## Los scripts generan o actualizan estos ficheros:
-
-- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (GroupId, VpcId, SubnetIds, InstanceId, AllocationId, PublicIp, Region, UserPoolId, ClientId, Domain, CallbackUrl, …). Lo escriben los scripts de create; no versionar.
-- `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
-- `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción.
-- `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
-
-Las carpetas necesarias deben existir previamente. `aws-scripts/cognito.sh` falla si no encuentra `eventhub-front-react/` o `eventhub-back-springboot/src/main/resources/`.
-
-## La aplicación estará disponible en
-
-### Front
-
-https://<PublicIp de lab-state.json>/
-
-### Documentación OpenAPI (solo desarrollo)
-
-Swagger no se publica en EC2. En local, arranca el backend con el perfil `dev`:
-
-```bash
-cd eventhub-back-springboot
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-```
-
-El UI queda en `http://localhost:8080/swagger-ui.html`.
-
-El perfil `dev` activa también la consola H2 en `http://localhost:8080/h2-console` (JDBC URL `jdbc:h2:mem:eventhubdb`, usuario `sa`, sin contraseña).
-
-## Ejecutar el frontend localmente
-
-```bash
-cd eventhub-front-react
-npm install
-npm run dev
-```
-
-La aplicación estará disponible normalmente en `http://localhost:3000`. En desarrollo las peticiones van a `http://localhost:8080` (`VITE_API_BASE_URL` en `.env.development`). El `build` de producción usa `.env.production.local` (generado por `front.sh`). Las variables de Cognito salen de `.env.local` (generado por `cognito.sh`).
+https://www.overleaf.com/read/dftvxsvhdywq#4e72c7
