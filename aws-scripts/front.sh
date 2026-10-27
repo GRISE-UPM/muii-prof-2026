@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Compila la SPA, la sube al bucket S3 y renueva la caché de CloudFront.
+# Compila el frontend, lo sube al bucket S3 y renueva la caché de CloudFront.
 # No tiene delete: el bucket se vacía y se borra con cloudfront.sh delete.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
@@ -23,11 +23,11 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 # Vite solo carga este fichero con npm run build, no con npm run dev.
-# La SPA y la API comparten origen (CloudFront reenvía /api/* al balanceador),
-# así que la SPA llama a rutas relativas: VITE_API_BASE_URL queda vacía.
+# El frontend y la API comparten origen (CloudFront reenvía /api/* al balanceador),
+# así que el frontend llama a rutas relativas: VITE_API_BASE_URL queda vacía.
 cat > "$APP_PATH/.env.production.local" <<EOF
 # Generado por aws-scripts/front.sh. No editar a mano.
-# VITE_API_BASE_URL: vacía; la API está en el mismo origen que la SPA (CloudFront)
+# VITE_API_BASE_URL: vacía; la API está en el mismo origen que el frontend (CloudFront)
 VITE_API_BASE_URL=
 EOF
 

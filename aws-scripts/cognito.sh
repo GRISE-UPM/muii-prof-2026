@@ -65,7 +65,7 @@ case "$ACTION" in
             fi
         done
 
-        # Callback HTTPS de la SPA: el dominio de CloudFront. DistributionDomain lo
+        # Callback HTTPS del frontend: el dominio de CloudFront. DistributionDomain lo
         # dejó cloudfront.sh en lab-state.json.
         DIST_DOMAIN=$(state_require DistributionDomain)
         CALLBACK_URL="https://${DIST_DOMAIN}"
@@ -99,7 +99,7 @@ case "$ACTION" in
             --output text >/dev/null
         echo "Dominio de Cognito creado."
 
-        echo "Creando App Client para la SPA..."
+        echo "Creando App Client para el frontend..."
 
         # --no-generate-secret: Cliente público; el secreto quedaría en el navegador
         # --allowed-o-auth-flows: Authorization code (con PKCE)
@@ -135,7 +135,7 @@ case "$ACTION" in
         cat > "$CONFIG_FILE" <<EOF
 # Generado por aws-scripts/cognito.sh. No editar a mano.
 # VITE_COGNITO_ISSUER_URI: emisor de los JWT, el mismo valor que usa Spring
-# VITE_COGNITO_CLIENT_ID: App Client de la SPA
+# VITE_COGNITO_CLIENT_ID: App Client del frontend
 # VITE_COGNITO_DOMAIN: Hosted UI para login y logout
 VITE_COGNITO_ISSUER_URI=$ISSUER_URI
 VITE_COGNITO_CLIENT_ID=$CLIENT_ID
@@ -148,8 +148,8 @@ EOF
 spring.security.oauth2.resourceserver.jwt.issuer-uri=$ISSUER_URI
 EOF
 
-        echo "El User Pool, el App Client y el dominio quedan en estos ficheros. La SPA y Spring los leen al arrancar; no van en el código:"
-        echo "  Frontend (variables de la SPA): $CONFIG_FILE"
+        echo "El User Pool, el App Client y el dominio quedan en estos ficheros. El frontend y Spring los leen al arrancar; no van en el código:"
+        echo "  Frontend (variables de Vite): $CONFIG_FILE"
         echo "  Backend (emisor del JWT): $SPRING_CONFIG_FILE"
         echo "Configuración de Cognito finalizada."
         ;;

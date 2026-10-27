@@ -41,7 +41,7 @@ public class SecurityConfig {
             // TODO: Tendremos que cambiar esta opción en una versión posterior cuando introduzcamos las 
             // Lambdas como Token Handlers
             .csrf(csrf -> csrf.disable())
-            // Nginx sirve front y API en el mismo origen: CORS no se usa en produccion.
+            // CloudFront sirve front y API en el mismo origen: CORS no se usa en produccion.
             // Solo el perfil 'dev' lo activa, para el Vite en http://localhost:3000.
             .cors(cors -> {
                 if (env.matchesProfiles("dev")) {
