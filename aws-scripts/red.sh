@@ -15,9 +15,6 @@ SG_NAME="eventhub-sg"
 ALB_SG_NAME="eventhub-alb-sg"
 BACK_PORT=8080
 
-# Lista de prefijos que AWS mantiene con las IP de CloudFront hacia los orígenes
-CLOUDFRONT_PREFIX_LIST="com.amazonaws.global.cloudfront.origin-facing"
-
 usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
@@ -71,32 +68,23 @@ case "$ACTION" in
         # --vpc-id: el grupo vive en la VPC por defecto
         ALB_SG_ID=$(aws ec2 create-security-group \
             --group-name "$ALB_SG_NAME" \
-            --description "Balanceador de eventhub: HTTP solo desde CloudFront" \
+            --description "Balanceador de eventhub: HTTP y HTTPS desde Internet" \
             --vpc-id "$VPC_ID" \
             --query "GroupId" \
             --output text)
         state_set AlbGroupId "$ALB_SG_ID"
 
-        # El balanceador solo acepta tráfico de CloudFront, no de cualquier IP:
-        # a la API solo se llega a través de la distribución.
-        # AWS mantiene la lista de prefijos con las IP de CloudFront; aquí solo se
-        # busca su identificador (pl-...).
-        PREFIX_LIST_ID=$(aws ec2 describe-managed-prefix-lists \
-            --filters "Name=prefix-list-name,Values=$CLOUDFRONT_PREFIX_LIST" \
-            --query 'PrefixLists[0].PrefixListId' \
-            --output text)
-        if [ -z "$PREFIX_LIST_ID" ] || [ "$PREFIX_LIST_ID" = "None" ]; then
-            echo "Error: No se encontró la lista de prefijos de CloudFront."
-            exit 1
-        fi
-
-        # --ip-permissions: forma larga de la regla, la única que admite una lista
-        # de prefijos como origen
-        aws ec2 authorize-security-group-ingress \
-            --group-id "$ALB_SG_ID" \
-            --ip-permissions "IpProtocol=tcp,FromPort=80,ToPort=80,PrefixListIds=[{PrefixListId=$PREFIX_LIST_ID}]" \
-            --output text >/dev/null
-        echo "Grupo del balanceador creado (ID: $ALB_SG_ID): puerto 80 abierto a CloudFront."
+        # El balanceador es el único punto de entrada: sin CloudFront, acepta HTTP (80)
+        # y HTTPS (443) desde cualquier origen. El 80 solo redirige al 443.
+        for PORT in 80 443; do
+            aws ec2 authorize-security-group-ingress \
+                --group-id "$ALB_SG_ID" \
+                --protocol tcp \
+                --port "$PORT" \
+                --cidr 0.0.0.0/0 \
+                --output text >/dev/null
+        done
+        echo "Grupo del balanceador creado (ID: $ALB_SG_ID): puertos 80 y 443 abiertos a Internet."
 
         echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
 

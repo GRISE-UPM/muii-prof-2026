@@ -65,10 +65,10 @@ case "$ACTION" in
             fi
         done
 
-        # Callback HTTPS del frontend: el dominio de CloudFront. DistributionDomain lo
-        # dejó cloudfront.sh en lab-state.json.
-        DIST_DOMAIN=$(state_require DistributionDomain)
-        CALLBACK_URL="https://${DIST_DOMAIN}"
+        # Callback HTTPS del frontend: el nombre DNS del balanceador. LoadBalancerDns lo
+        # dejó alb.sh en lab-state.json.
+        ALB_DNS=$(state_require LoadBalancerDns)
+        CALLBACK_URL="https://${ALB_DNS}"
         echo "Callback de Cognito: $CALLBACK_URL"
         echo "Dominio de Cognito: $COGNITO_DOMAIN"
 

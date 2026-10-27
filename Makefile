@@ -5,24 +5,21 @@ AWS_SCRIPTS := aws-scripts
 .PHONY: deploy delete
 
 # El orden importa: cada script lee de lab-state.json lo que dejaron los anteriores.
-# cognito.sh necesita el dominio de CloudFront (callback), y back.sh empaqueta
+# cognito.sh necesita el nombre DNS del balanceador (callback), y back.sh empaqueta
 # cognito.properties y aurora.properties en la imagen.
 deploy:
 	bash $(AWS_SCRIPTS)/red.sh create
 	bash $(AWS_SCRIPTS)/aurora.sh create
 	bash $(AWS_SCRIPTS)/alb.sh create
-	bash $(AWS_SCRIPTS)/cloudfront.sh create
 	bash $(AWS_SCRIPTS)/cognito.sh create
 	bash $(AWS_SCRIPTS)/ecs.sh create
 	bash $(AWS_SCRIPTS)/back.sh
 	bash $(AWS_SCRIPTS)/front.sh
 	@echo "Despliegue completo finalizado correctamente."
 
-# El servicio y las tareas se van con ecs.sh delete; el build del frontend, con
-# cloudfront.sh delete. .env.production.local es local.
+# Los servicios y las tareas se van con ecs.sh delete. .env.production.local es local.
 delete:
 	bash $(AWS_SCRIPTS)/ecs.sh delete
-	bash $(AWS_SCRIPTS)/cloudfront.sh delete
 	bash $(AWS_SCRIPTS)/alb.sh delete
 	bash $(AWS_SCRIPTS)/cognito.sh delete
 	bash $(AWS_SCRIPTS)/aurora.sh delete

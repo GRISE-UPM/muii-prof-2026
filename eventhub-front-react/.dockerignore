@@ -1,0 +1,4 @@
+# Docker solo necesita el build y la configuración de Nginx: el resto del proyecto no entra en el contexto de construcción
+*
+!dist
+!nginx.conf
