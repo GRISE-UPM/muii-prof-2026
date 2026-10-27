@@ -10,11 +10,11 @@ Aplicación para gestionar eventos, compuesta por:
 
 ```
 Navegador ──HTTPS──> CloudFront (*.cloudfront.net)
-                      ├── /*      ──> S3 (SPA, bucket privado)
+                      ├── /*      ──> S3 (frontend, bucket privado)
                       └── /api/*  ──HTTP──> ALB ──> tareas ECS Fargate (2 zonas) ──> Aurora PostgreSQL
 ```
 
-- CloudFront pone el HTTPS con su certificado `*.cloudfront.net`. La SPA y la API comparten origen, así que no hace falta CORS.
+- CloudFront pone el HTTPS con su certificado `*.cloudfront.net`. El frontend y la API comparten origen, así que no hace falta CORS.
 - El balanceador solo acepta tráfico de CloudFront, y las tareas solo del balanceador. Aurora solo acepta conexiones de las tareas.
 - El balanceador comprueba la salud de cada tarea en `/actuator/health/liveness` y deja de enviar peticiones a las que no responden.
 
@@ -27,7 +27,7 @@ Navegador ──HTTPS──> CloudFront (*.cloudfront.net)
 - Node.js y npm
 - Docker (con el daemon arrancado: `back.sh` construye la imagen)
 - Python 3
-- AWS CLI y jq
+- AWS CLI, jq y envsubst (del paquete gettext; en macOS, `brew install gettext` y `brew link --force gettext`)
 
 ### Configura las credenciales de AWS:
 
@@ -52,7 +52,7 @@ desde la raíz. Los scripts se ejecutan en este orden, y cada uno lee de `lab-st
 | `red.sh` | Subnets de la VPC por defecto y los grupos de seguridad del balanceador (`eventhub-alb-sg`) y de las tareas (`eventhub-sg`) |
 | `aurora.sh` | Clúster Aurora PostgreSQL con una instancia en cada zona, y `aurora.properties` |
 | `alb.sh` | Application Load Balancer, grupo de destino y listener HTTP:80 |
-| `cloudfront.sh` | Bucket S3 privado y distribución de CloudFront con dos orígenes (S3 y el balanceador) |
+| `cloudfront.sh` | Bucket S3 privado y distribución de CloudFront con dos orígenes (S3 y el balanceador), a partir de la plantilla `distribution.json` |
 | `cognito.sh` | User Pool, cliente y dominio de Cognito, con el dominio de CloudFront como callback |
 | `ecs.sh` | Repositorio ECR, grupo de logs de CloudWatch y clúster de ECS |
 | `back.sh` | Compila el backend, sube la imagen a ECR y crea (o actualiza) el servicio con dos tareas |
@@ -74,7 +74,7 @@ make delete
 
 - `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (VpcId, SubnetIds, GroupId, AlbGroupId, LoadBalancerArn, TargetGroupArn, BucketName, DistributionId, DistributionDomain, EcsCluster, EcsService, UserPoolId, ClientId, CallbackUrl, …). Lo escriben los scripts de create; no versionar.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
-- `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción. Queda vacía: la API está en el mismo origen que la SPA.
+- `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción. Queda vacía: la API está en el mismo origen que el frontend.
 - `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
 - `eventhub-back-springboot/src/main/resources/aurora.properties`: nombre del secreto de Aurora que importa Spring Boot y datos de conexión (`aurora.host`, `aurora.port`, `aurora.dbname`).
 

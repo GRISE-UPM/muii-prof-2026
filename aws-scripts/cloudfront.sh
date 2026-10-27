@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Crea o borra el bucket S3 del frontend y la distribución de CloudFront que sirve
-# la SPA desde S3 y reenvía /api/* al balanceador.
+# el frontend desde S3 y reenvía /api/* al balanceador.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
@@ -16,7 +16,7 @@ S3_ORIGIN_ID="s3-front"
 ALB_ORIGIN_ID="alb-api"
 
 # Políticas gestionadas de CloudFront (sus IDs son fijos en todas las cuentas):
-#   CachingOptimized: cachea los ficheros de la SPA
+#   CachingOptimized: cachea los ficheros del frontend
 #   CachingDisabled: no cachea nada de la API
 #   AllViewerExceptHostHeader: reenvía a la API cabeceras, cookies y query string
 CACHE_POLICY_OPTIMIZED="658327ea-f89d-4fab-a63d-7e88639e58f6"
@@ -47,6 +47,11 @@ fi
 
 case "$ACTION" in
     create)
+        if ! command -v envsubst >/dev/null 2>&1; then
+            echo "Error: Falta envsubst (paquete gettext). Instálalo, por ejemplo, con: brew install gettext"
+            exit 1
+        fi
+
         # LoadBalancerDns lo escribió alb.sh en lab-state.json.
         ALB_DNS=$(state_require LoadBalancerDns)
 
@@ -79,55 +84,23 @@ case "$ACTION" in
 
         echo "Creando la distribución de CloudFront..."
 
-        # CallerReference: valor único; si la petición se repite, no crea otra distribución.
+        # La configuración de la distribución está en distribution.json. Sus marcadores
+        # ${...} los sustituye envsubst por las variables que se exportan aquí:
+        #   CALLER_REFERENCE: valor único; si la petición se repite, no crea otra distribución.
         # Dos orígenes:
-        #   s3-front: la SPA (comportamiento por defecto), cacheada en el edge
+        #   s3-front: el frontend (comportamiento por defecto), cacheado en el edge
         #   alb-api: /api/*, sin caché y con todos los métodos HTTP
         # http-only: el balanceador no tiene certificado; el HTTPS lo pone CloudFront.
-        # redirect-to-https: una petición HTTP a la SPA se redirige a HTTPS.
+        # redirect-to-https: una petición HTTP al frontend se redirige a HTTPS.
         # https-only: la API rechaza HTTP (un POST redirigido perdería su cuerpo).
         # PriceClass_100: solo ubicaciones de Norteamérica y Europa, las más baratas.
+        export CALLER_REFERENCE="eventhub-$(date +%s)"
+        export BUCKET_DOMAIN="${BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com"
+        export OAC_ID ALB_DNS S3_ORIGIN_ID ALB_ORIGIN_ID
+        export CACHE_POLICY_OPTIMIZED CACHE_POLICY_DISABLED ORIGIN_REQUEST_ALL_EXCEPT_HOST
         DIST_CONFIG=$(mktemp)
-        jq -n \
-            --arg ref "eventhub-$(date +%s)" \
-            --arg bucketDomain "${BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com" \
-            --arg oac "$OAC_ID" \
-            --arg albDns "$ALB_DNS" \
-            --arg s3Id "$S3_ORIGIN_ID" \
-            --arg albId "$ALB_ORIGIN_ID" \
-            --arg optimized "$CACHE_POLICY_OPTIMIZED" \
-            --arg disabled "$CACHE_POLICY_DISABLED" \
-            --arg allExceptHost "$ORIGIN_REQUEST_ALL_EXCEPT_HOST" \
-            '{
-              CallerReference: $ref,
-              Comment: "eventhub: SPA en S3 y /api/* en el balanceador",
-              Enabled: true,
-              DefaultRootObject: "index.html",
-              PriceClass: "PriceClass_100",
-              Origins: {Quantity: 2, Items: [
-                {Id: $s3Id, DomainName: $bucketDomain, OriginAccessControlId: $oac,
-                 S3OriginConfig: {OriginAccessIdentity: ""}},
-                {Id: $albId, DomainName: $albDns,
-                 CustomOriginConfig: {HTTPPort: 80, HTTPSPort: 443, OriginProtocolPolicy: "http-only"}}
-              ]},
-              DefaultCacheBehavior: {
-                TargetOriginId: $s3Id,
-                ViewerProtocolPolicy: "redirect-to-https",
-                CachePolicyId: $optimized,
-                Compress: true,
-                AllowedMethods: {Quantity: 2, Items: ["GET", "HEAD"],
-                                 CachedMethods: {Quantity: 2, Items: ["GET", "HEAD"]}}
-              },
-              CacheBehaviors: {Quantity: 1, Items: [{
-                PathPattern: "/api/*",
-                TargetOriginId: $albId,
-                ViewerProtocolPolicy: "https-only",
-                CachePolicyId: $disabled,
-                OriginRequestPolicyId: $allExceptHost,
-                AllowedMethods: {Quantity: 7, Items: ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
-                                 CachedMethods: {Quantity: 2, Items: ["GET", "HEAD"]}}
-              }]}
-            }' > "$DIST_CONFIG"
+        envsubst '${CALLER_REFERENCE} ${BUCKET_DOMAIN} ${OAC_ID} ${ALB_DNS} ${S3_ORIGIN_ID} ${ALB_ORIGIN_ID} ${CACHE_POLICY_OPTIMIZED} ${CACHE_POLICY_DISABLED} ${ORIGIN_REQUEST_ALL_EXCEPT_HOST}' \
+            < "$SCRIPT_DIR/distribution.json" > "$DIST_CONFIG"
 
         DIST_INFO=$(aws cloudfront create-distribution \
             --distribution-config "file://$DIST_CONFIG" \
