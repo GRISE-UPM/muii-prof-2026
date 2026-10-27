@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # Crea o borra la red de eventhub: subnets de la VPC por defecto y los dos grupos de seguridad.
+# Si ya existe el clúster Aurora de los alumnos (versión 4.0.0), las tareas reutilizan su grupo
+# de seguridad en lugar de crear otro, y delete no lo borra.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
@@ -14,6 +16,7 @@ source "$SCRIPT_DIR/jq-functions.sh"
 SG_NAME="eventhub-sg"
 ALB_SG_NAME="eventhub-alb-sg"
 BACK_PORT=8080
+DB_CLUSTER_ID="eventhub-cluster-aurora"
 
 usage() {
     echo "Uso: $0 {create|delete}"
@@ -86,16 +89,28 @@ case "$ACTION" in
         done
         echo "Grupo del balanceador creado (ID: $ALB_SG_ID): puertos 80 y 443 abiertos a Internet."
 
-        echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
+        # Si el clúster Aurora ya existe, su grupo de seguridad es el de las tareas: así llegan al
+        # puerto 5432 sin tocar nada del clúster. previo.sh ya comprobó que no tiene reglas
+        # abiertas a Internet.
+        SG_ID=$(aws rds describe-db-clusters --db-cluster-identifier "$DB_CLUSTER_ID" \
+            --query 'DBClusters[0].VpcSecurityGroups[0].VpcSecurityGroupId' \
+            --output text 2>/dev/null || true)
+        if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+            echo "El clúster '$DB_CLUSTER_ID' ya existe: las tareas reutilizan su grupo de seguridad ($SG_ID)."
+            state_set GroupId "$SG_ID"
+            state_set GroupExistente true
+        else
+            echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
 
-        # El mismo grupo alojará después el clúster Aurora (aurora.sh)
-        SG_ID=$(aws ec2 create-security-group \
-            --group-name "$SG_NAME" \
-            --description "Tareas de ECS y cluster Aurora de eventhub" \
-            --vpc-id "$VPC_ID" \
-            --query "GroupId" \
-            --output text)
-        state_set GroupId "$SG_ID"
+            # El mismo grupo alojará después el clúster Aurora (aurora.sh)
+            SG_ID=$(aws ec2 create-security-group \
+                --group-name "$SG_NAME" \
+                --description "Tareas de ECS y cluster Aurora de eventhub" \
+                --vpc-id "$VPC_ID" \
+                --query "GroupId" \
+                --output text)
+            state_set GroupId "$SG_ID"
+        fi
 
         # --source-group: al puerto de Spring Boot solo llega el balanceador.
         # aurora.sh abre después el 5432 dentro de este mismo grupo.
@@ -105,7 +120,7 @@ case "$ACTION" in
             --port "$BACK_PORT" \
             --source-group "$ALB_SG_ID" \
             --output text >/dev/null
-        echo "Grupo de las tareas creado (ID: $SG_ID): puerto $BACK_PORT abierto al balanceador."
+        echo "Grupo de las tareas listo (ID: $SG_ID): puerto $BACK_PORT abierto al balanceador."
 
         echo "La VPC, las subnets y los grupos de seguridad quedan en lab-state.json:"
         echo "  $LAB_STATE_FILE"
@@ -118,10 +133,25 @@ case "$ACTION" in
         # Las interfaces de red de las tareas y del balanceador tardan en liberarse
         # después de borrarlos: si el grupo sigue en uso, se reintenta.
         # La VPC por defecto no es de este script: no se borra.
+        # Si el grupo de las tareas es el del clúster Aurora que ya existía, no se borra (lo usa
+        # la base de datos): solo se quita la regla del 8080, para poder borrar el del balanceador.
         SG_ID=$(state_require GroupId)
         ALB_SG_ID=$(state_require AlbGroupId)
 
-        for GROUP in "$SG_ID" "$ALB_SG_ID"; do
+        if [ "$(state_get GroupExistente)" = "true" ]; then
+            echo "El grupo '$SG_ID' lo usa la base de datos: se conserva y se retira su regla del puerto $BACK_PORT."
+            aws ec2 revoke-security-group-ingress \
+                --group-id "$SG_ID" \
+                --protocol tcp \
+                --port "$BACK_PORT" \
+                --source-group "$ALB_SG_ID" \
+                --output text >/dev/null
+            GROUPS_TO_DELETE="$ALB_SG_ID"
+        else
+            GROUPS_TO_DELETE="$SG_ID $ALB_SG_ID"
+        fi
+
+        for GROUP in $GROUPS_TO_DELETE; do
             echo "Eliminando grupo de seguridad '$GROUP'..."
             for intento in $(seq 1 20); do
                 if aws ec2 delete-security-group --group-id "$GROUP" 2>/dev/null; then
@@ -137,7 +167,7 @@ case "$ACTION" in
         done
 
         tmp=$(mktemp)
-        jq 'del(.VpcId, .SubnetIds, .GroupId, .AlbGroupId)' "$LAB_STATE_FILE" > "$tmp"
+        jq 'del(.VpcId, .SubnetIds, .GroupId, .AlbGroupId, .GroupExistente)' "$LAB_STATE_FILE" > "$tmp"
         mv "$tmp" "$LAB_STATE_FILE"
         echo "Red eliminada."
         ;;

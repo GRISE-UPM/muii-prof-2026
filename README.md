@@ -14,7 +14,8 @@ Navegador ──HTTPS──> ALB (certificado autofirmado)
                       └── /api/*  ──> tareas ECS Fargate del backend (2 zonas) ──> Aurora PostgreSQL
 ```
 
-- Esta versión (5.1.0) es una alternativa a la 5.0.0 para los laboratorios que no permiten CloudFront (AWS Academy Learner Lab). En la 5.0.0, CloudFront pone el HTTPS y sirve el frontend desde S3.
+- Esta versión (5.2.0) es una alternativa a la 5.0.0 para los laboratorios que no permiten CloudFront (AWS Academy Learner Lab). En la 5.0.0, CloudFront pone el HTTPS y sirve el frontend desde S3.
+- A diferencia de la 5.1.0, que crea siempre la base de datos, esta versión **reutiliza el clúster Aurora que ya existe** (el de la versión 4.0.0) y solo lo crea si no existe. `make delete` no borra una base de datos que ya existía.
 - El HTTPS lo pone un certificado autofirmado que `alb.sh` importa en ACM. El navegador avisa de que no puede verificarlo, y hay que aceptarlo. El puerto 80 redirige al 443.
 - El frontend y la API comparten origen (el balanceador reparte por ruta), así que no hace falta CORS.
 - El balanceador acepta tráfico de Internet, y las tareas solo del balanceador. Aurora solo acepta conexiones de las tareas.
@@ -47,12 +48,13 @@ Navegador ──HTTPS──> ALB (certificado autofirmado)
 make deploy
 ```
 
-desde la raíz. Los scripts se ejecutan en este orden, y cada uno lee de `lab-state.json` lo que dejaron los anteriores:
+desde la raíz. Antes de crear nada, `previo.sh` comprueba que no quedan restos de eventhub de versiones anteriores (una EC2 de la versión 4.0.0, su IP elástica, reglas abiertas a Internet en `eventhub-sg`, un User Pool de Cognito, un balanceador o un clúster de ECS). Si los encuentra, **se detiene sin crear ni modificar nada** y lista lo que hay que eliminar. Hay que borrar todo lo que se refiera a eventhub, excepto las bases de datos. Después, los scripts se ejecutan en este orden, y cada uno lee de `lab-state.json` lo que dejaron los anteriores:
 
 | Script | Crea |
 |---|---|
-| `red.sh` | Subnets de la VPC por defecto y los grupos de seguridad del balanceador (`eventhub-alb-sg`) y de las tareas (`eventhub-sg`) |
-| `aurora.sh` | Clúster Aurora PostgreSQL con una instancia en cada zona, y `aurora.properties` |
+| `previo.sh` | Nada: solo comprueba que no quedan restos de eventhub, y se detiene si los hay |
+| `red.sh` | Subnets de la VPC por defecto y el grupo de seguridad del balanceador (`eventhub-alb-sg`). Para las tareas reutiliza el grupo de seguridad del clúster Aurora si ya existe, y si no, crea `eventhub-sg` |
+| `aurora.sh` | Si el clúster Aurora existe, lo reutiliza y escribe `aurora.properties`. Si no, crea el clúster con una instancia en cada zona |
 | `alb.sh` | Application Load Balancer, un grupo de destino para el backend y otro para el frontend, el certificado autofirmado (importado en ACM), el listener HTTPS:443 con la regla `/api/*` y el listener HTTP:80 que redirige al 443 |
 | `cognito.sh` | User Pool, cliente y dominio de Cognito, con el nombre DNS del balanceador como callback |
 | `ecs.sh` | Repositorios ECR y grupos de logs de CloudWatch del backend y del frontend, y clúster de ECS |
@@ -69,7 +71,7 @@ Para eliminar todo, en orden inverso:
 make delete
 ```
 
-`make delete` también elimina los ficheros locales generados (`.env.local`, `cognito.properties`, etc.); el siguiente `create` los regenera.
+`make delete` también elimina los ficheros locales generados (`.env.local`, `cognito.properties`, etc.); el siguiente `create` los regenera. Si la base de datos Aurora ya existía cuando se desplegó, `make delete` la conserva, junto con su grupo de seguridad, y solo retira lo que creó este despliegue.
 
 ## Los scripts generan o actualizan estos ficheros:
 
@@ -99,7 +101,7 @@ El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el 
 - Aurora es accesible solo desde la VPC: `aurora.sh` abre el puerto 5432 en el grupo de seguridad de las tareas y únicamente para el tráfico de ese mismo grupo.
 - Los tests no necesitan AWS: `src/test/resources/application.properties` arranca H2 en memoria con credenciales fijas.
 
-`make delete` elimina las dos instancias, el clúster y su subnet group; RDS se encarga de retirar el secreto.
+`make delete` elimina las dos instancias, el clúster y su subnet group, si los creó este despliegue; RDS se encarga de retirar el secreto. Si ya existían, los conserva.
 
 ## La aplicación estará disponible en
 

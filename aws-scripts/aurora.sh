@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # Crea o borra el clúster Aurora PostgreSQL y escribe aurora.properties.
+# Si el clúster ya existe (los alumnos lo crearon en la versión 4.0.0), no crea otro: lo
+# reutiliza, deja en lab-state.json lo que describe y escribe aurora.properties. En ese caso,
+# delete no borra la base de datos, porque no es de este despliegue.
 # Termina en el primer comando que falle y muestra el error de ese comando.
 set -e
 
@@ -30,8 +33,8 @@ usage() {
     echo "Uso: $0 {create|delete}"
     echo ""
     echo "Ejemplos:"
-    echo "  $0 create # Crea el clúster Aurora con una instancia en cada zona y escribe aurora.properties"
-    echo "  $0 delete # Borra las instancias, el clúster, el subnet group y la regla del puerto 5432"
+    echo "  $0 create # Crea el clúster Aurora con una instancia en cada zona (o reutiliza el existente) y escribe aurora.properties"
+    echo "  $0 delete # Borra las instancias, el clúster, el subnet group y la regla del puerto 5432 (si lo creó create)"
     exit 1
 }
 
@@ -54,6 +57,74 @@ case "$ACTION" in
         echo "Clúster Aurora: $DB_CLUSTER_ID"
         echo "Subnets: $SUBNET_IDS"
         echo "Grupo de seguridad: $SG_ID"
+
+        # Si el clúster ya existe, se reutiliza. Lo habitual es que lo creara el alumno en la
+        # versión 4.0.0. Se lee de él todo lo que el resto del despliegue necesita.
+        EXISTING=$(aws rds describe-db-clusters --db-cluster-identifier "$DB_CLUSTER_ID" \
+            --query 'DBClusters[0].[Endpoint,MasterUserSecret.SecretArn,Port,DatabaseName,DBSubnetGroup]' \
+            --output text 2>/dev/null || true)
+        if [ -n "$EXISTING" ] && [ "$EXISTING" != "None" ]; then
+            echo "El clúster '$DB_CLUSTER_ID' ya existe: se reutiliza y no se crea otro."
+
+            # Un clúster que no está available (por ejemplo, creándose) no sirve todavía
+            aws rds wait db-cluster-available --db-cluster-identifier "$DB_CLUSTER_ID"
+
+            read -r DB_HOST SECRET_ARN DB_PORT DB_NAME DB_SUBNET_GROUP <<< "$EXISTING"
+            if [ -z "$DB_HOST" ] || [ "$DB_HOST" = "None" ]; then
+                echo "Error: El clúster '$DB_CLUSTER_ID' no tiene endpoint de escritura."
+                exit 1
+            fi
+            if [ -z "$SECRET_ARN" ] || [ "$SECRET_ARN" = "None" ]; then
+                echo "Error: El clúster '$DB_CLUSTER_ID' no tiene secreto de usuario master gestionado por Aurora."
+                exit 1
+            fi
+            DB_INSTANCE_IDS=$(aws rds describe-db-clusters --db-cluster-identifier "$DB_CLUSTER_ID" \
+                --query 'DBClusters[0].DBClusterMembers[].DBInstanceIdentifier' --output text)
+
+            # Las tareas se conectan desde el mismo grupo de seguridad que usa el clúster
+            # (red.sh lo reutiliza). Casi siempre la regla del 5432 ya está; si falta, se añade.
+            if ! RESULT=$(aws ec2 authorize-security-group-ingress \
+                    --group-id "$SG_ID" \
+                    --protocol tcp \
+                    --port "$DB_PORT" \
+                    --source-group "$SG_ID" \
+                    --output text 2>&1); then
+                case "$RESULT" in
+                    *InvalidPermission.Duplicate*) ;;
+                    *) echo "$RESULT"; exit 1 ;;
+                esac
+            fi
+
+            SECRET_NAME=$(aws secretsmanager describe-secret \
+                --secret-id "$SECRET_ARN" \
+                --query Name \
+                --output text)
+
+            state_set DBClusterIdentifier "$DB_CLUSTER_ID"
+            state_set DBSubnetGroupName "$DB_SUBNET_GROUP"
+            # shellcheck disable=SC2086
+            state_set_array DBInstanceIdentifiers $DB_INSTANCE_IDS
+            state_set Endpoint "$DB_HOST"
+            state_set SecretArn "$SECRET_ARN"
+            # Marca que el clúster no lo creó este despliegue: delete no lo borra
+            state_set AuroraExistente true
+
+            cat > "$SPRING_CONFIG_FILE" << EOF
+# Generado por aws-scripts/aurora.sh. No editar a mano.
+# El secreto lo crea Aurora y aporta username y password. Spring lo importa al arrancar.
+# aurora.host, aurora.port y aurora.dbname no son secretos: construyen la URL JDBC.
+spring.config.import=aws-secretsmanager:${SECRET_NAME}
+aurora.host=${DB_HOST}
+aurora.port=${DB_PORT}
+aurora.dbname=${DB_NAME}
+EOF
+
+            echo "Clúster reutilizado. Sus datos quedan en estos ficheros. Spring lee aurora.properties al arrancar; no van en el código:"
+            echo "  $LAB_STATE_FILE"
+            echo "  Backend (secreto y endpoint de Aurora): $SPRING_CONFIG_FILE"
+            echo "Configuración de Aurora finalizada."
+            exit 0
+        fi
 
         # create-db-instance coloca cada instancia en una zona, no en una subnet.
         # Sin --availability-zone, RDS elige la zona y las dos instancias podrían
@@ -196,6 +267,19 @@ EOF
         ;;
 
     delete)
+
+        # Si create reutilizó un clúster que ya existía, no se borra: no es de este despliegue.
+        # Solo se retiran sus datos de lab-state.json y el fichero aurora.properties.
+        if [ "$(state_get AuroraExistente)" = "true" ]; then
+            echo "El clúster '$(state_get DBClusterIdentifier)' existía antes de este despliegue: se conserva."
+            rm -f "$SPRING_CONFIG_FILE"
+            tmp=$(mktemp)
+            jq 'del(.DBSubnetGroupName, .DBClusterIdentifier, .DBInstanceIdentifiers, .SecretArn, .Endpoint, .AuroraExistente)' \
+                "$LAB_STATE_FILE" > "$tmp"
+            mv "$tmp" "$LAB_STATE_FILE"
+            echo "Aurora conservada."
+            exit 0
+        fi
 
         # IDs de lab-state.json. Nada se conserva: ni snapshot ni la regla del 5432.
         # Las instancias se borran antes que el clúster, y el subnet group cuando ya no lo usa.

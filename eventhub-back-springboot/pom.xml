@@ -11,7 +11,7 @@
     </parent>
     <groupId>es.upm.grise.profundizacion</groupId>
     <artifactId>eventhub</artifactId>
-    <version>5.1.0</version>
+    <version>5.2.0</version>
     <name>eventhub</name>
     <description>Proyecto Spring Boot para gestión de eventos</description>
 
