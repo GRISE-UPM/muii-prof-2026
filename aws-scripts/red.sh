@@ -90,7 +90,6 @@ case "$ACTION" in
         if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
             echo "El clúster '$DB_CLUSTER_ID' ya existe: las tareas reutilizan su grupo de seguridad ($SG_ID)."
             state_set GroupId "$SG_ID"
-            state_set GroupExistente true
         else
             echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
 
@@ -125,12 +124,13 @@ case "$ACTION" in
         # Las interfaces de red de las tareas y del balanceador tardan en liberarse
         # después de borrarlos: si el grupo sigue en uso, se reintenta.
         # La VPC por defecto no es de este script: no se borra.
-        # Si el grupo de las tareas es el del clúster Aurora que ya existía, no se borra (lo usa
-        # la base de datos): solo se quita la regla del 8080, para poder borrar el del balanceador.
+        # Si la base de datos se conserva (lo decidió aurora.sh delete), su grupo de seguridad, que
+        # es el de las tareas, tampoco se borra: solo se quita la regla del 8080, para poder borrar
+        # el del balanceador.
         SG_ID=$(state_require GroupId)
         ALB_SG_ID=$(state_require AlbGroupId)
 
-        if [ "$(state_get GroupExistente)" = "true" ]; then
+        if [ "$(state_get AuroraConservada)" = "true" ]; then
             echo "El grupo '$SG_ID' lo usa la base de datos: se conserva y se retira su regla del puerto $BACK_PORT."
             aws ec2 revoke-security-group-ingress \
                 --group-id "$SG_ID" \
@@ -159,7 +159,7 @@ case "$ACTION" in
         done
 
         tmp=$(mktemp)
-        jq 'del(.VpcId, .SubnetIds, .GroupId, .AlbGroupId, .GroupExistente)' "$LAB_STATE_FILE" > "$tmp"
+        jq 'del(.VpcId, .SubnetIds, .GroupId, .AlbGroupId, .AuroraConservada)' "$LAB_STATE_FILE" > "$tmp"
         mv "$tmp" "$LAB_STATE_FILE"
         echo "Red eliminada."
         ;;

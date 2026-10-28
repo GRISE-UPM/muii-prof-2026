@@ -23,7 +23,7 @@ deploy:
 
 # Los servicios y las tareas se van con ecs.sh delete; el build del frontend y Nginx, con
 # nginx.sh delete. .env.production.local es local.
-# Si la base de datos Aurora ya existía antes del despliegue, aurora.sh delete no la borra.
+# aurora.sh delete pregunta si se conserva o se borra la base de datos Aurora.
 delete:
 	bash $(AWS_SCRIPTS)/ecs.sh delete
 	bash $(AWS_SCRIPTS)/nginx.sh delete
