@@ -3,22 +3,26 @@
 Aplicación para gestionar eventos, compuesta por:
 
 - `eventhub-back-springboot`: API REST Spring Boot con JPA, Aurora PostgreSQL (usando las credenciales que Aurora almacena en AWS Secrets Manager), seguridad OAuth2/JWT y OpenAPI. Se empaqueta como imagen Docker y se ejecuta en Amazon ECS con Fargate.
-- `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT. Se empaqueta como imagen Docker con Nginx y se ejecuta en Amazon ECS con Fargate.
-- `aws-scripts`: scripts para crear la red, el clúster Aurora, el balanceador con su certificado, Cognito y el clúster de ECS, y para publicar el backend y el frontend.
+- `eventhub-front-react`: aplicación React/Vite para la interfaz web, con login Cognito y visualización de JWT. Se sirve como sitio estático desde Amazon S3, a través de una instancia EC2 con Nginx.
+- `aws-scripts`: scripts para crear la red, el clúster Aurora, el balanceador, el bucket S3 y la instancia con Nginx, Cognito y el clúster de ECS, y para publicar el backend y el frontend.
 
 ## Arquitectura
 
 ```
-Navegador ──HTTPS──> ALB (certificado autofirmado)
-                      ├── /*      ──> tareas ECS Fargate del frontend (Nginx, 2 zonas)
-                      └── /api/*  ──> tareas ECS Fargate del backend (2 zonas) ──> Aurora PostgreSQL
+Navegador ──HTTPS──> EC2 con Nginx (IP elástica, certificado autofirmado)
+                      ├── /*      ──HTTPS──> S3 (frontend, bucket privado)
+                      └── /api/*  ──HTTP──> ALB ──> tareas ECS Fargate (2 zonas) ──> Aurora PostgreSQL
 ```
 
-- Esta versión (5.2.0) es una alternativa a la 5.0.0 para los laboratorios que no permiten CloudFront (AWS Academy Learner Lab). En la 5.0.0, CloudFront pone el HTTPS y sirve el frontend desde S3.
+- Esta versión (5.2.0) es una alternativa a la 5.0.0 para los laboratorios que no permiten CloudFront (AWS Academy Learner Lab). La instancia EC2 con Nginx ocupa el lugar de CloudFront, igual que en la versión 1.0.0 Nginx resolvía el HTTPS y el reparto por ruta. La arquitectura es la misma que la de la 5.0.0.
 - A diferencia de la 5.1.0, que crea siempre la base de datos, esta versión **reutiliza el clúster Aurora que ya existe** (el de la versión 4.0.0) y solo lo crea si no existe. `make delete` no borra una base de datos que ya existía.
-- El HTTPS lo pone un certificado autofirmado que `alb.sh` importa en ACM. El navegador avisa de que no puede verificarlo, y hay que aceptarlo. El puerto 80 redirige al 443.
-- El frontend y la API comparten origen (el balanceador reparte por ruta), así que no hace falta CORS.
-- El balanceador acepta tráfico de Internet, y las tareas solo del balanceador. Aurora solo acepta conexiones de las tareas.
+- El HTTPS lo pone un certificado autofirmado que genera la instancia al arrancar. El navegador avisa de que no puede verificarlo, y hay que aceptarlo. El puerto 80 redirige al 443.
+- El frontend y la API comparten origen (Nginx reparte por ruta), así que no hace falta CORS.
+- El bucket es privado, y solo lo lee la IP elástica de la instancia (política con `aws:SourceIp`). Con CloudFront era la distribución la que tenía el permiso.
+- El balanceador solo acepta tráfico de la instancia con Nginx, y las tareas solo del balanceador. Aurora solo acepta conexiones de las tareas.
+- Nginx resuelve en cada petición los nombres del balanceador y de S3, porque sus direcciones IP cambian sin avisar. La IP elástica de la instancia, en cambio, es fija.
+- Sin CloudFront no hay caché en el borde: todas las peticiones del frontend llegan a S3.
+- La instancia con Nginx es un punto único de fallo, a diferencia del backend, que corre en dos zonas.
 - El balanceador comprueba la salud de cada tarea en `/actuator/health/liveness` y deja de enviar peticiones a las que no responden.
 
 ## Requisitos
@@ -30,7 +34,7 @@ Navegador ──HTTPS──> ALB (certificado autofirmado)
 - Node.js y npm
 - Docker (con el daemon arrancado: `back.sh` construye la imagen)
 - Python 3
-- AWS CLI, jq y openssl
+- AWS CLI, jq y curl
 
 ### Configura las credenciales de AWS:
 
@@ -55,13 +59,14 @@ desde la raíz. Antes de crear nada, `previo.sh` comprueba que no quedan restos 
 | `previo.sh` | Nada: solo comprueba que no quedan restos de eventhub, y se detiene si los hay |
 | `red.sh` | Subnets de la VPC por defecto y el grupo de seguridad del balanceador (`eventhub-alb-sg`). Para las tareas reutiliza el grupo de seguridad del clúster Aurora si ya existe, y si no, crea `eventhub-sg` |
 | `aurora.sh` | Si el clúster Aurora existe, lo reutiliza y escribe `aurora.properties`. Si no, crea el clúster con una instancia en cada zona |
-| `alb.sh` | Application Load Balancer, un grupo de destino para el backend y otro para el frontend, el certificado autofirmado (importado en ACM), el listener HTTPS:443 con la regla `/api/*` y el listener HTTP:80 que redirige al 443 |
-| `cognito.sh` | User Pool, cliente y dominio de Cognito, con el nombre DNS del balanceador como callback |
-| `ecs.sh` | Repositorios ECR y grupos de logs de CloudWatch del backend y del frontend, y clúster de ECS |
+| `alb.sh` | Application Load Balancer, grupo de destino y listener HTTP:80 |
+| `nginx.sh` | Bucket S3 privado, IP elástica e instancia EC2 con Nginx (certificado autofirmado, `/*` a S3 y `/api/*` al balanceador) |
+| `cognito.sh` | User Pool, cliente y dominio de Cognito, con la IP elástica como callback |
+| `ecs.sh` | Repositorio ECR, grupo de logs de CloudWatch y clúster de ECS |
 | `back.sh` | Compila el backend, sube la imagen a ECR y crea (o actualiza) el servicio con dos tareas |
-| `front.sh` | Compila el frontend, construye la imagen con Nginx, la sube a ECR y crea (o actualiza) el servicio con dos tareas |
+| `front.sh` | Compila el frontend y lo sube al bucket |
 
-Si una fase falla, el despliegue se detiene. La creación de Aurora tarda varios minutos. Cognito en AWS no se borra: si el User Pool o el dominio ya existen, se reutilizan.
+Si una fase falla, el despliegue se detiene. La creación de Aurora y la de Nginx tardan varios minutos. Cognito en AWS no se borra: si el User Pool o el dominio ya existen, se reutilizan.
 
 Para publicar una nueva versión del código basta con volver a ejecutar `back.sh` o `front.sh`. ECS sustituye las tareas poco a poco, sin cortar el servicio.
 
@@ -75,7 +80,7 @@ make delete
 
 ## Los scripts generan o actualizan estos ficheros:
 
-- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (VpcId, SubnetIds, GroupId, AlbGroupId, LoadBalancerArn, TargetGroupArn, FrontTargetGroupArn, CertificateArn, EcsCluster, EcsService, FrontEcsService, UserPoolId, ClientId, CallbackUrl, …). Lo escriben los scripts de create; no versionar.
+- `aws-scripts/lab-state.json`: IDs de infraestructura del laboratorio (VpcId, SubnetIds, GroupId, AlbGroupId, LoadBalancerArn, TargetGroupArn, BucketName, InstanceId, AllocationId, PublicIp, EcsCluster, EcsService, UserPoolId, ClientId, CallbackUrl, …). Lo escriben los scripts de create; no versionar.
 - `eventhub-front-react/.env.local`: variables de Cognito utilizadas por Vite (dev y build).
 - `eventhub-front-react/.env.production.local`: URL de la API utilizada por Vite en el build de producción. Queda vacía: la API está en el mismo origen que el frontend.
 - `eventhub-back-springboot/src/main/resources/cognito.properties`: emisor JWT utilizado por Spring Boot.
@@ -107,7 +112,7 @@ El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el 
 
 ### Front
 
-https://<LoadBalancerDns de lab-state.json>/
+https://<PublicIp de lab-state.json>/
 
 La API queda en la misma dirección, bajo `/api/`.
 
