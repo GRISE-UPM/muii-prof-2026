@@ -75,9 +75,10 @@ echo "Compilando el backend Spring Boot..."
 cd "$BACKEND_PATH"
 mvn clean package -DskipTests
 
-# La etiqueta con la fecha distingue cada despliegue; ECS arranca tareas nuevas
-# porque la definición de tarea cambia de imagen.
-IMAGE_TAG=$(date +%Y%m%d%H%M%S)
+# Etiqueta fija: cada despliegue sustituye la imagen anterior en ECR (la antigua queda
+# sin etiqueta). Como la definición de tarea no cambia, update-service usa
+# --force-new-deployment para que ECS arranque tareas nuevas y descargue la imagen.
+IMAGE_TAG="latest"
 IMAGE_URI="$REPOSITORY_URI:$IMAGE_TAG"
 
 echo "Construyendo la imagen $IMAGE_URI ($DOCKER_PLATFORM)..."
@@ -170,6 +171,7 @@ else
         --cluster "$CLUSTER_NAME" \
         --service "$SERVICE_NAME" \
         --task-definition "$TASK_DEF_ARN" \
+        --force-new-deployment \
         --output text >/dev/null
 fi
 
