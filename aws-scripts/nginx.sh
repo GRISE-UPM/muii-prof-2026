@@ -163,6 +163,7 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -subj "/CN=__PUBLIC_IP__" -addext "subjectAltName=IP:__PUBLIC_IP__"
 
 cat > /etc/nginx/sites-available/default <<'NGINX_CONF'
+# Puerto 80: solo redirige al HTTPS
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -178,10 +179,13 @@ server {
     ssl_certificate /etc/nginx/ssl/nginx.crt;
     ssl_certificate_key /etc/nginx/ssl/nginx.key;
 
+    # Servidor DNS de la VPC. Con los nombres en variables, Nginx los resuelve en cada
+    # petición y no solo al arrancar (sus IP cambian, los nombres no).
     resolver __VPC_RESOLVER__ valid=30s;
     set $alb_host "__ALB_DNS__";
     set $s3_host "__S3_HOST__";
 
+    # La API va al balanceador, por HTTP
     location /api/ {
         proxy_pass http://$alb_host;
         proxy_http_version 1.1;
@@ -190,6 +194,7 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # El resto se pide al bucket, por HTTPS. La raíz es index.html.
     location / {
         set $objeto $uri;
         if ($uri = /) {
@@ -199,10 +204,12 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $s3_host;
         proxy_ssl_server_name on;
+        # Si S3 no encuentra el objeto (responde 403), se sirve index.html
         proxy_intercept_errors on;
         error_page 403 404 = @spa;
     }
 
+    # Las rutas de React no son ficheros: index.html y que React las resuelva
     location @spa {
         proxy_pass https://$s3_host/index.html;
         proxy_http_version 1.1;
