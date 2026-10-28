@@ -59,5 +59,3 @@ ehthumbs.db
 
 # Documentación: se publica desde Overleaf, no desde el repositorio
 docs/*
-!docs/list-resources.sh
-!docs/draw-architecture.py
