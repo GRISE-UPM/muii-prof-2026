@@ -2,9 +2,10 @@
 
 # Comprobación previa al despliegue. Es lo primero que ejecuta make deploy.
 #
-# Esta versión (5.2.0) reutiliza la base de datos Aurora que los alumnos ya crearon en la
-# versión 4.0.0, y despliega todo lo demás. Para que no haya conflictos, no debe quedar en
-# la cuenta nada más de eventhub de las versiones anteriores, salvo las bases de datos.
+# Esta versión (5.1.0) reutiliza la base de datos Aurora que los alumnos ya crearon en la
+# versión 4.0.0, si existe, y despliega todo lo demás. Si no existe, la crea. Para que no haya
+# conflictos, no debe quedar en la cuenta nada más de eventhub de las versiones anteriores,
+# salvo las bases de datos.
 #
 # Decisión de diseño: si el script encuentra restos de eventhub, se detiene antes de crear
 # nada y pide al alumno que los elimine él, en lugar de borrarlos por su cuenta. Son recursos
@@ -16,7 +17,7 @@ set -u
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 
-# Nombres que usan los scripts de las versiones 4.0.0, 5.0.0, 5.1.0 y 5.2.0
+# Nombres que usan los scripts de las versiones 4.0.0, 5.0.0 y 5.1.0
 SG_NAME="eventhub-sg"
 ALB_SG_NAME="eventhub-alb-sg"
 NGINX_SG_NAME="eventhub-nginx-sg"
@@ -182,11 +183,23 @@ if [ ${#PROBLEMAS[@]} -gt 0 ]; then
     exit 1
 fi
 
-# Información: qué se hará con Aurora
+# Aurora: si ya existe, se reutiliza. Se avisa y se pide confirmación, porque make delete
+# (aurora.sh delete) preguntará después si se conserva o se borra, y borrarla no se puede deshacer.
+# Sin terminal (por ejemplo, en un script) no se pregunta y se continúa.
 CLUSTER_DB=$(aws rds describe-db-clusters --db-cluster-identifier "$DB_CLUSTER_ID" \
     --query 'DBClusters[0].Status' --output text 2>/dev/null || true)
 if [ -n "$CLUSTER_DB" ] && [ "$CLUSTER_DB" != "None" ]; then
-    echo "Aurora: el clúster '$DB_CLUSTER_ID' ya existe (estado: $CLUSTER_DB). Se reutiliza y no se creará otro."
+    echo "Aurora: el clúster '$DB_CLUSTER_ID' ya existe (estado: $CLUSTER_DB). Se reutilizará y no se creará otro."
+    echo "Con make delete se te preguntará si lo conservas o lo borras."
+    if [ -t 0 ]; then
+        read -r -p "¿Quieres continuar el despliegue con esa base de datos? [S/n] " RESPUESTA
+        case "$RESPUESTA" in
+            [nN]|[nN][oO])
+                echo "Despliegue cancelado. No se ha creado ni modificado nada."
+                exit 1
+                ;;
+        esac
+    fi
 else
     echo "Aurora: el clúster '$DB_CLUSTER_ID' no existe. Se creará."
 fi

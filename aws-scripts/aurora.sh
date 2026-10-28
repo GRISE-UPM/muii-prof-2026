@@ -106,7 +106,7 @@ case "$ACTION" in
             state_set_array DBInstanceIdentifiers $DB_INSTANCE_IDS
             state_set Endpoint "$DB_HOST"
             state_set SecretArn "$SECRET_ARN"
-            # Marca que el clúster no lo creó este despliegue: delete no lo borra
+            # Marca que el clúster no lo creó este despliegue: delete conserva el clúster por defecto
             state_set AuroraExistente true
 
             cat > "$SPRING_CONFIG_FILE" << EOF
@@ -268,13 +268,37 @@ EOF
 
     delete)
 
-        # Si create reutilizó un clúster que ya existía, no se borra: no es de este despliegue.
-        # Solo se retiran sus datos de lab-state.json y el fichero aurora.properties.
+        # Borrar la base de datos no se puede deshacer: se pregunta. Por defecto se conserva el
+        # clúster que ya existía antes del despliegue (lo normal, el de la versión 4.0.0) y se
+        # borra el que creó este despliegue. BORRAR_AURORA=si|no responde sin preguntar, y sin
+        # terminal (por ejemplo, en un script) se aplica el valor por defecto.
         if [ "$(state_get AuroraExistente)" = "true" ]; then
-            echo "El clúster '$(state_get DBClusterIdentifier)' existía antes de este despliegue: se conserva."
+            ORIGEN="existía antes de este despliegue"
+            POR_DEFECTO="no"
+            PROMPT="¿Borrar la base de datos? [s/N] "
+        else
+            ORIGEN="lo creó este despliegue"
+            POR_DEFECTO="si"
+            PROMPT="¿Borrar la base de datos? [S/n] "
+        fi
+        RESPUESTA="${BORRAR_AURORA:-}"
+        if [ -z "$RESPUESTA" ] && [ -t 0 ]; then
+            echo "El clúster Aurora '$(state_get DBClusterIdentifier)' $ORIGEN."
+            echo "Si lo borras, se pierden sus datos (no se guarda ninguna copia)."
+            read -r -p "$PROMPT" RESPUESTA
+        fi
+        case "$RESPUESTA" in
+            [sS]|[sS][iI]|[yY]|[yY][eE][sS]) BORRAR="si" ;;
+            [nN]|[nN][oO]) BORRAR="no" ;;
+            *) BORRAR="$POR_DEFECTO" ;;
+        esac
+
+        # La decisión la lee red.sh: el grupo de seguridad de las tareas es el de la base de datos
+        if [ "$BORRAR" = "no" ]; then
+            echo "El clúster '$(state_get DBClusterIdentifier)' se conserva."
             rm -f "$SPRING_CONFIG_FILE"
             tmp=$(mktemp)
-            jq 'del(.DBSubnetGroupName, .DBClusterIdentifier, .DBInstanceIdentifiers, .SecretArn, .Endpoint, .AuroraExistente)' \
+            jq 'del(.DBSubnetGroupName, .DBClusterIdentifier, .DBInstanceIdentifiers, .SecretArn, .Endpoint, .AuroraExistente) | .AuroraConservada = "true"' \
                 "$LAB_STATE_FILE" > "$tmp"
             mv "$tmp" "$LAB_STATE_FILE"
             echo "Aurora conservada."
@@ -329,7 +353,7 @@ EOF
         rm -f "$SPRING_CONFIG_FILE"
 
         tmp=$(mktemp)
-        jq 'del(.DBSubnetGroupName, .DBClusterIdentifier, .DBInstanceIdentifiers, .SecretArn, .Endpoint)' \
+        jq 'del(.DBSubnetGroupName, .DBClusterIdentifier, .DBInstanceIdentifiers, .SecretArn, .Endpoint, .AuroraExistente)' \
             "$LAB_STATE_FILE" > "$tmp"
         mv "$tmp" "$LAB_STATE_FILE"
         echo "Aurora eliminada."

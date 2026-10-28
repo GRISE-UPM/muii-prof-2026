@@ -14,8 +14,8 @@ Navegador ──HTTPS──> EC2 con Nginx (IP elástica, certificado autofirmad
                       └── /api/*  ──HTTP──> ALB ──> tareas ECS Fargate (2 zonas) ──> Aurora PostgreSQL
 ```
 
-- Esta versión (5.2.0) es una alternativa a la 5.0.0 para los laboratorios que no permiten CloudFront (AWS Academy Learner Lab). La instancia EC2 con Nginx ocupa el lugar de CloudFront, igual que en la versión 1.0.0 Nginx resolvía el HTTPS y el reparto por ruta. La arquitectura es la misma que la de la 5.0.0.
-- A diferencia de la 5.1.0, que crea siempre la base de datos, esta versión **reutiliza el clúster Aurora que ya existe** (el de la versión 4.0.0) y solo lo crea si no existe. `make delete` no borra una base de datos que ya existía.
+- Esta versión (5.1.0) es una alternativa a la 5.0.0 para los laboratorios que no permiten CloudFront (AWS Academy Learner Lab). La instancia EC2 con Nginx ocupa el lugar de CloudFront, igual que en la versión 1.0.0 Nginx resolvía el HTTPS y el reparto por ruta. La arquitectura es la misma que la de la 5.0.0.
+- Si el clúster Aurora ya existe (el de la versión 4.0.0), esta versión **lo reutiliza**, avisa y pide confirmación antes de seguir. Si no existe, lo crea. `make delete` pregunta si se conserva o se borra la base de datos.
 - El HTTPS lo pone un certificado autofirmado que genera la instancia al arrancar. El navegador avisa de que no puede verificarlo, y hay que aceptarlo. El puerto 80 redirige al 443.
 - El frontend y la API comparten origen (Nginx reparte por ruta), así que no hace falta CORS.
 - El bucket es privado, y solo lo lee la IP elástica de la instancia (política con `aws:SourceIp`). Con CloudFront era la distribución la que tenía el permiso.
@@ -56,7 +56,7 @@ desde la raíz. Antes de crear nada, `previo.sh` comprueba que no quedan restos 
 
 | Script | Crea |
 |---|---|
-| `previo.sh` | Nada: solo comprueba que no quedan restos de eventhub, y se detiene si los hay |
+| `previo.sh` | Nada: comprueba que no quedan restos de eventhub, y se detiene si los hay. Si Aurora ya existe, avisa de que se reutilizará y pide confirmación |
 | `red.sh` | Subnets de la VPC por defecto y el grupo de seguridad del balanceador (`eventhub-alb-sg`). Para las tareas reutiliza el grupo de seguridad del clúster Aurora si ya existe, y si no, crea `eventhub-sg` |
 | `aurora.sh` | Si el clúster Aurora existe, lo reutiliza y escribe `aurora.properties`. Si no, crea el clúster con una instancia en cada zona |
 | `alb.sh` | Application Load Balancer, grupo de destino y listener HTTP:80 |
@@ -76,7 +76,7 @@ Para eliminar todo, en orden inverso:
 make delete
 ```
 
-`make delete` también elimina los ficheros locales generados (`.env.local`, `cognito.properties`, etc.); el siguiente `create` los regenera. Si la base de datos Aurora ya existía cuando se desplegó, `make delete` la conserva, junto con su grupo de seguridad, y solo retira lo que creó este despliegue.
+`make delete` también elimina los ficheros locales generados (`.env.local`, `cognito.properties`, etc.); el siguiente `create` los regenera. `make delete` pregunta si se conserva o se borra la base de datos Aurora. Por defecto se conserva la que ya existía antes del despliegue y se borra la que creó este (sin terminal, o con `BORRAR_AURORA=si` o `BORRAR_AURORA=no`, no pregunta). Si se conserva, su grupo de seguridad también, y `make delete` solo retira lo que creó este despliegue.
 
 ## Los scripts generan o actualizan estos ficheros:
 
@@ -106,7 +106,7 @@ El backend usa Aurora PostgreSQL, y su usuario y su contraseña no están en el 
 - Aurora es accesible solo desde la VPC: `aurora.sh` abre el puerto 5432 en el grupo de seguridad de las tareas y únicamente para el tráfico de ese mismo grupo.
 - Los tests no necesitan AWS: `src/test/resources/application.properties` arranca H2 en memoria con credenciales fijas.
 
-`make delete` elimina las dos instancias, el clúster y su subnet group, si los creó este despliegue; RDS se encarga de retirar el secreto. Si ya existían, los conserva.
+Si se decide borrar la base de datos, `make delete` elimina las dos instancias, el clúster y su subnet group, y RDS se encarga de retirar el secreto. Si se decide conservarla, no toca ninguno de ellos.
 
 ## La aplicación estará disponible en
 

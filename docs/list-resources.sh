@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/../aws-scripts/jq-functions.sh"
 
 OUT_DIR="$PROJECT_ROOT/docs"
 OUT_FILE="$OUT_DIR/resources.json"
-VERSION="5.2.0"
+VERSION="5.1.0"
 
 mkdir -p "$OUT_DIR"
 
