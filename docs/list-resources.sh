@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Lista los recursos AWS del laboratorio en docs/resources.json.
-# Parte de lab-state.json (red.sh, aurora.sh, alb.sh, cognito.sh, ecs.sh, back.sh y
-# front.sh) y completa los datos con describe.
+# Parte de lab-state.json (red.sh, aurora.sh, alb.sh, nginx.sh, cognito.sh,
+# ecs.sh y back.sh) y completa los datos con describe.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/../aws-scripts/jq-functions.sh"
 
 OUT_DIR="$PROJECT_ROOT/docs"
 OUT_FILE="$OUT_DIR/resources.json"
-VERSION="5.1.0"
+VERSION="5.0.0"
 
 mkdir -p "$OUT_DIR"
 
@@ -29,20 +29,17 @@ ALB_GROUP_ID=$(state_require AlbGroupId)
 
 ALB_ARN=$(state_require LoadBalancerArn)
 TG_ARN=$(state_require TargetGroupArn)
-FRONT_TG_ARN=$(state_require FrontTargetGroupArn)
 LISTENER_ARN=$(state_require ListenerArn)
-HTTP_LISTENER_ARN=$(state_require HttpListenerArn)
-CERT_ARN=$(state_require CertificateArn)
+
+BUCKET_NAME=$(state_require BucketName)
+INSTANCE_ID=$(state_require InstanceId)
+ALLOCATION_ID=$(state_require AllocationId)
 
 REPOSITORY_URI=$(state_require EcrRepositoryUri)
-FRONT_REPOSITORY_URI=$(state_require FrontEcrRepositoryUri)
 CLUSTER_NAME=$(state_require EcsCluster)
 LOG_GROUP=$(state_require LogGroup)
-FRONT_LOG_GROUP=$(state_require FrontLogGroup)
 SERVICE_NAME=$(state_require EcsService)
-FRONT_SERVICE_NAME=$(state_require FrontEcsService)
 TASK_DEF_ARN=$(state_require TaskDefinitionArn)
-FRONT_TASK_DEF_ARN=$(state_require FrontTaskDefinitionArn)
 
 USER_POOL_ID=$(state_require UserPoolId)
 CLIENT_ID=$(state_require ClientId)
@@ -78,43 +75,33 @@ SUBNETS_JSON=$(aws ec2 describe-subnets --subnet-ids $SUBNET_IDS --output json)
 SG_JSON=$(aws ec2 describe-security-groups --group-ids "$ALB_GROUP_ID" "$GROUP_ID" --output json)
 
 ALB_JSON=$(aws elbv2 describe-load-balancers --load-balancer-arns "$ALB_ARN" --output json)
-TG_JSON=$(aws elbv2 describe-target-groups --target-group-arns "$TG_ARN" "$FRONT_TG_ARN" --output json)
-# Una entrada por tarea registrada en cada grupo de destino, con su IP y su estado de salud.
-TG_HEALTH_JSON=$(jq -n \
-    --arg backArn "$TG_ARN" \
-    --argjson back "$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --output json)" \
-    --arg frontArn "$FRONT_TG_ARN" \
-    --argjson front "$(aws elbv2 describe-target-health --target-group-arn "$FRONT_TG_ARN" --output json)" \
-    '{($backArn): $back.TargetHealthDescriptions, ($frontArn): $front.TargetHealthDescriptions}')
-LISTENERS_JSON=$(aws elbv2 describe-listeners --listener-arns "$LISTENER_ARN" "$HTTP_LISTENER_ARN" --output json)
-# Reglas del listener HTTPS: /api/* al backend y, por defecto, al frontend.
-RULES_JSON=$(aws elbv2 describe-rules --listener-arn "$LISTENER_ARN" --output json)
-CERT_JSON=$(aws acm describe-certificate --certificate-arn "$CERT_ARN" --output json)
+TG_JSON=$(aws elbv2 describe-target-groups --target-group-arns "$TG_ARN" --output json)
+# Una entrada por tarea registrada, con su IP y su estado de salud.
+TG_HEALTH_JSON=$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --output json)
+LISTENER_JSON=$(aws elbv2 describe-listeners --listener-arns "$LISTENER_ARN" --output json)
 
-# Un objeto por repositorio, con las etiquetas de sus imágenes.
-ECR_JSON=$(for URI in "$REPOSITORY_URI" "$FRONT_REPOSITORY_URI"; do
-        NAME="${URI#*/}"
-        jq -n \
-            --argjson repo "$(aws ecr describe-repositories --repository-names "$NAME" --output json)" \
-            --argjson images "$(aws ecr describe-images --repository-name "$NAME" --output json)" \
-            '$repo.repositories[0] + {imageTags: ($images.imageDetails | map(.imageTags // []) | add // [])}'
-    done | jq -s '.')
-LOG_GROUP_JSON=$(jq -n \
-    --argjson back "$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --output json)" \
-    --argjson front "$(aws logs describe-log-groups --log-group-name-prefix "$FRONT_LOG_GROUP" --output json)" \
-    '{logGroups: ($back.logGroups + $front.logGroups)}')
+INSTANCE_JSON=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --output json)
+ADDRESS_JSON=$(aws ec2 describe-addresses --allocation-ids "$ALLOCATION_ID" --output json)
+BUCKET_POLICY_JSON=$(aws s3api get-bucket-policy --bucket "$BUCKET_NAME" --query Policy --output text)
+BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" \
+    --query LocationConstraint --output text)
+# Fuera de us-east-1 get-bucket-location devuelve la región; en us-east-1, None.
+if [ "$BUCKET_REGION" = "None" ]; then
+    BUCKET_REGION="us-east-1"
+fi
+BUCKET_OBJECTS=$(aws s3api list-objects-v2 --bucket "$BUCKET_NAME" \
+    --query 'KeyCount' --output text)
+
+REPOSITORY_NAME="${REPOSITORY_URI#*/}"
+ECR_JSON=$(aws ecr describe-repositories --repository-names "$REPOSITORY_NAME" --output json)
+ECR_IMAGES_JSON=$(aws ecr describe-images --repository-name "$REPOSITORY_NAME" --output json)
+LOG_GROUP_JSON=$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --output json)
 
 ECS_CLUSTER_JSON=$(aws ecs describe-clusters --clusters "$CLUSTER_NAME" --output json)
-ECS_SERVICE_JSON=$(aws ecs describe-services --cluster "$CLUSTER_NAME" \
-    --services "$SERVICE_NAME" "$FRONT_SERVICE_NAME" --output json)
-TASK_DEF_JSON=$(jq -n \
-    --argjson back "$(aws ecs describe-task-definition --task-definition "$TASK_DEF_ARN" --output json)" \
-    --argjson front "$(aws ecs describe-task-definition --task-definition "$FRONT_TASK_DEF_ARN" --output json)" \
-    '{taskDefinitions: [$back.taskDefinition, $front.taskDefinition]}')
-TASK_ARNS=$(for SVC in "$SERVICE_NAME" "$FRONT_SERVICE_NAME"; do
-        aws ecs list-tasks --cluster "$CLUSTER_NAME" --service-name "$SVC" \
-            --query 'taskArns[]' --output text
-    done | tr '\t' ' ' | xargs)
+ECS_SERVICE_JSON=$(aws ecs describe-services --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME" --output json)
+TASK_DEF_JSON=$(aws ecs describe-task-definition --task-definition "$TASK_DEF_ARN" --output json)
+TASK_ARNS=$(aws ecs list-tasks --cluster "$CLUSTER_NAME" --service-name "$SERVICE_NAME" \
+    --query 'taskArns[]' --output text)
 if [ -n "$TASK_ARNS" ]; then
     # shellcheck disable=SC2086
     TASKS_JSON=$(aws ecs describe-tasks --cluster "$CLUSTER_NAME" --tasks $TASK_ARNS --output json)
@@ -123,7 +110,7 @@ else
 fi
 
 # Rol que usan las tareas (rol de ejecución y rol de la tarea): LabRole en AWS Academy.
-TASK_ROLE_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.taskDefinitions[0].taskRoleArn // empty')
+TASK_ROLE_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.taskDefinition.taskRoleArn // empty')
 if [ -n "$TASK_ROLE_ARN" ]; then
     ROLE_JSON=$(aws iam get-role --role-name "${TASK_ROLE_ARN##*/}" --output json 2>/dev/null \
         || echo '{"Role": null}')
@@ -161,10 +148,15 @@ jq -n \
     --argjson alb "$ALB_JSON" \
     --argjson targetGroup "$TG_JSON" \
     --argjson targetHealth "$TG_HEALTH_JSON" \
-    --argjson listeners "$LISTENERS_JSON" \
-    --argjson rules "$RULES_JSON" \
-    --argjson certificate "$CERT_JSON" \
-    --argjson repositories "$ECR_JSON" \
+    --argjson listener "$LISTENER_JSON" \
+    --arg bucketName "$BUCKET_NAME" \
+    --arg bucketRegion "$BUCKET_REGION" \
+    --arg bucketObjects "$BUCKET_OBJECTS" \
+    --argjson instance "$INSTANCE_JSON" \
+    --argjson address "$ADDRESS_JSON" \
+    --argjson bucketPolicy "$BUCKET_POLICY_JSON" \
+    --argjson ecr "$ECR_JSON" \
+    --argjson ecrImages "$ECR_IMAGES_JSON" \
     --argjson logGroups "$LOG_GROUP_JSON" \
     --argjson ecsCluster "$ECS_CLUSTER_JSON" \
     --argjson ecsService "$ECS_SERVICE_JSON" \
@@ -211,7 +203,7 @@ jq -n \
               mapPublicIpOnLaunch: .MapPublicIpOnLaunch
             })
         )
-        # Origen de cada regla: rangos IP, lista de prefijos u otro grupo.
+        # Origen de cada regla: rangos IP u otro grupo.
         + (
           $securityGroups.SecurityGroups
           | map({
@@ -244,79 +236,71 @@ jq -n \
             state: .State.Code,
             availabilityZones: (.AvailabilityZones | map(.ZoneName)),
             securityGroupIds: .SecurityGroups
-          })
-        ]
-        + (
-          $targetGroup.TargetGroups
-          | map(. as $tg | {
-              type: "AWS::ElasticLoadBalancingV2::TargetGroup",
-              service: "Elastic Load Balancing",
-              id: .TargetGroupArn,
-              name: .TargetGroupName,
-              protocol: .Protocol,
-              port: .Port,
-              targetType: .TargetType,
-              healthCheckPath: .HealthCheckPath,
-              targets: ($targetHealth[$tg.TargetGroupArn]
-                | map({ip: .Target.Id, port: .Target.Port, availabilityZone: .Target.AvailabilityZone, health: .TargetHealth.State}))
-            })
-        )
-        + (
-          $listeners.Listeners
-          | map({
-              type: "AWS::ElasticLoadBalancingV2::Listener",
-              service: "Elastic Load Balancing",
-              id: .ListenerArn,
-              protocol: .Protocol,
-              port: .Port,
-              certificateArns: ((.Certificates // []) | map(.CertificateArn)),
-              defaultAction: .DefaultActions[0].Type,
-              targetGroupArn: (.DefaultActions[0].TargetGroupArn // null)
-            })
-        )
-        + (
-          $rules.Rules
-          | map(select(.IsDefault | not))
-          | map({
-              type: "AWS::ElasticLoadBalancingV2::ListenerRule",
-              service: "Elastic Load Balancing",
-              id: .RuleArn,
-              priority: (.Priority | tonumber),
-              pathPatterns: (.Conditions | map(select(.Field == "path-pattern") | .Values[]) ),
-              targetGroupArn: (.Actions[0].TargetGroupArn // null)
-            })
-        )
-        + [
-          ($certificate.Certificate | {
-            type: "AWS::CertificateManager::Certificate",
-            service: "AWS Certificate Manager",
-            id: .CertificateArn,
-            domainName: .DomainName,
-            certificateType: .Type,
-            status: .Status,
-            notAfter: .NotAfter
-          })
-        ]
-        + (
-          $repositories
-          | map({
-              type: "AWS::ECR::Repository",
-              service: "Amazon ECR",
-              id: .repositoryName,
-              uri: .repositoryUri,
-              imageTags: .imageTags
-            })
-        )
-        + (
-          $logGroups.logGroups
-          | map({
-              type: "AWS::Logs::LogGroup",
-              service: "Amazon CloudWatch Logs",
-              id: .logGroupName,
-              retentionInDays: (.retentionInDays // null)
-            })
-        )
-        + [
+          }),
+          ($targetGroup.TargetGroups[0] | {
+            type: "AWS::ElasticLoadBalancingV2::TargetGroup",
+            service: "Elastic Load Balancing",
+            id: .TargetGroupArn,
+            name: .TargetGroupName,
+            protocol: .Protocol,
+            port: .Port,
+            targetType: .TargetType,
+            healthCheckPath: .HealthCheckPath,
+            targets: ($targetHealth.TargetHealthDescriptions
+              | map({ip: .Target.Id, port: .Target.Port, availabilityZone: .Target.AvailabilityZone, health: .TargetHealth.State}))
+          }),
+          ($listener.Listeners[0] | {
+            type: "AWS::ElasticLoadBalancingV2::Listener",
+            service: "Elastic Load Balancing",
+            id: .ListenerArn,
+            protocol: .Protocol,
+            port: .Port,
+            targetGroupArn: (.DefaultActions[0].TargetGroupArn // null)
+          }),
+          {
+            type: "AWS::S3::Bucket",
+            service: "Amazon S3",
+            id: $bucketName,
+            region: $bucketRegion,
+            objectCount: ($bucketObjects | tonumber? // 0)
+          },
+          ($bucketPolicy.Statement[0] | {
+            type: "AWS::S3::BucketPolicy",
+            service: "Amazon S3",
+            id: .Sid,
+            effect: .Effect,
+            action: .Action,
+            allowedSourceIp: .Condition.IpAddress."aws:SourceIp"
+          }),
+          ($instance.Reservations[0].Instances[0] | {
+            type: "AWS::EC2::Instance",
+            service: "Amazon EC2",
+            id: .InstanceId,
+            instanceType: .InstanceType,
+            state: .State.Name,
+            availabilityZone: .Placement.AvailabilityZone,
+            publicIp: .PublicIpAddress
+          }),
+          ($address.Addresses[0] | {
+            type: "AWS::EC2::EIP",
+            service: "Amazon EC2",
+            id: .AllocationId,
+            publicIp: .PublicIp,
+            instanceId: .InstanceId
+          }),
+          ($ecr.repositories[0] | {
+            type: "AWS::ECR::Repository",
+            service: "Amazon ECR",
+            id: .repositoryName,
+            uri: .repositoryUri,
+            imageTags: ($ecrImages.imageDetails | map(.imageTags // []) | add // [])
+          }),
+          ($logGroups.logGroups[0] | {
+            type: "AWS::Logs::LogGroup",
+            service: "Amazon CloudWatch Logs",
+            id: .logGroupName,
+            retentionInDays: (.retentionInDays // null)
+          }),
           ($ecsCluster.clusters[0] | {
             type: "AWS::ECS::Cluster",
             service: "Amazon ECS",
@@ -324,42 +308,36 @@ jq -n \
             arn: .clusterArn,
             status: .status,
             runningTasksCount: .runningTasksCount
+          }),
+          ($taskDefinition.taskDefinition | {
+            type: "AWS::ECS::TaskDefinition",
+            service: "Amazon ECS",
+            id: .taskDefinitionArn,
+            family: .family,
+            revision: .revision,
+            cpu: .cpu,
+            memory: .memory,
+            cpuArchitecture: (.runtimePlatform.cpuArchitecture // null),
+            executionRoleArn: .executionRoleArn,
+            taskRoleArn: .taskRoleArn,
+            image: .containerDefinitions[0].image
+          }),
+          ($ecsService.services[0] | {
+            type: "AWS::ECS::Service",
+            service: "Amazon ECS",
+            id: .serviceName,
+            arn: .serviceArn,
+            status: .status,
+            launchType: .launchType,
+            desiredCount: .desiredCount,
+            runningCount: .runningCount,
+            taskDefinition: .taskDefinition,
+            subnetIds: .networkConfiguration.awsvpcConfiguration.subnets,
+            securityGroupIds: .networkConfiguration.awsvpcConfiguration.securityGroups,
+            assignPublicIp: .networkConfiguration.awsvpcConfiguration.assignPublicIp,
+            targetGroupArns: (.loadBalancers | map(.targetGroupArn))
           })
         ]
-        + (
-          $taskDefinition.taskDefinitions
-          | map({
-              type: "AWS::ECS::TaskDefinition",
-              service: "Amazon ECS",
-              id: .taskDefinitionArn,
-              family: .family,
-              revision: .revision,
-              cpu: .cpu,
-              memory: .memory,
-              cpuArchitecture: (.runtimePlatform.cpuArchitecture // null),
-              executionRoleArn: .executionRoleArn,
-              taskRoleArn: (.taskRoleArn // null),
-              image: .containerDefinitions[0].image
-            })
-        )
-        + (
-          $ecsService.services
-          | map({
-              type: "AWS::ECS::Service",
-              service: "Amazon ECS",
-              id: .serviceName,
-              arn: .serviceArn,
-              status: .status,
-              launchType: .launchType,
-              desiredCount: .desiredCount,
-              runningCount: .runningCount,
-              taskDefinition: .taskDefinition,
-              subnetIds: .networkConfiguration.awsvpcConfiguration.subnets,
-              securityGroupIds: .networkConfiguration.awsvpcConfiguration.securityGroups,
-              assignPublicIp: .networkConfiguration.awsvpcConfiguration.assignPublicIp,
-              targetGroupArns: (.loadBalancers | map(.targetGroupArn))
-            })
-        )
         # Tareas en marcha: cambian con cada despliegue, cada fallo y cada escalado.
         + (
           $tasks.tasks

@@ -68,23 +68,15 @@ case "$ACTION" in
         # --vpc-id: el grupo vive en la VPC por defecto
         ALB_SG_ID=$(aws ec2 create-security-group \
             --group-name "$ALB_SG_NAME" \
-            --description "Balanceador de eventhub: HTTP y HTTPS desde Internet" \
+            --description "Balanceador de eventhub: HTTP solo desde Nginx" \
             --vpc-id "$VPC_ID" \
             --query "GroupId" \
             --output text)
         state_set AlbGroupId "$ALB_SG_ID"
 
-        # El balanceador es el único punto de entrada: sin CloudFront, acepta HTTP (80)
-        # y HTTPS (443) desde cualquier origen. El 80 solo redirige al 443.
-        for PORT in 80 443; do
-            aws ec2 authorize-security-group-ingress \
-                --group-id "$ALB_SG_ID" \
-                --protocol tcp \
-                --port "$PORT" \
-                --cidr 0.0.0.0/0 \
-                --output text >/dev/null
-        done
-        echo "Grupo del balanceador creado (ID: $ALB_SG_ID): puertos 80 y 443 abiertos a Internet."
+        # El grupo nace sin reglas de entrada. nginx.sh abre después el puerto 80 solo a la
+        # IP elástica de la instancia con Nginx: a la API solo se llega a través de ella.
+        echo "Grupo del balanceador creado (ID: $ALB_SG_ID): sin reglas de entrada hasta nginx.sh."
 
         echo "Creando el grupo de seguridad de las tareas '$SG_NAME'..."
 
