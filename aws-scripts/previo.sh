@@ -19,11 +19,12 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 # Nombres que usan los scripts de las versiones 4.0.0, 5.0.0, 5.1.0 y 5.2.0
 SG_NAME="eventhub-sg"
 ALB_SG_NAME="eventhub-alb-sg"
+NGINX_SG_NAME="eventhub-nginx-sg"
 ALB_NAME="eventhub-alb"
 CLUSTER_NAME="eventhub"
 POOL_NAME="eventhub-pool"
-REPOSITORIES="eventhub-back eventhub-front"
-LOG_GROUPS="/ecs/eventhub-back /ecs/eventhub-front"
+REPOSITORIES="eventhub-back"
+LOG_GROUPS="/ecs/eventhub-back"
 DB_CLUSTER_ID="eventhub-cluster-aurora"
 
 PROBLEMAS=()
@@ -87,6 +88,36 @@ ALB_SG_ID=$(aws ec2 describe-security-groups \
 if [ -n "$ALB_SG_ID" ] && [ "$ALB_SG_ID" != "None" ]; then
     problema "Grupo de seguridad '$ALB_SG_NAME' ($ALB_SG_ID)" \
              "Elimínalo, después de borrar el balanceador y de quitar su regla del grupo '$SG_NAME'"
+fi
+
+# --- Grupo de seguridad de Nginx, su instancia y el bucket del frontend (versiones 5.x)
+NGINX_SG_ID=$(aws ec2 describe-security-groups \
+    --filters "Name=group-name,Values=$NGINX_SG_NAME" \
+    --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)
+if [ -n "$NGINX_SG_ID" ] && [ "$NGINX_SG_ID" != "None" ]; then
+    NGINX_INSTANCIAS=$(aws ec2 describe-instances \
+        --filters "Name=instance.group-id,Values=$NGINX_SG_ID" \
+                  "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+        --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null || true)
+    for INSTANCIA in $NGINX_INSTANCIAS; do
+        problema "Instancia EC2 $INSTANCIA, con el grupo de seguridad '$NGINX_SG_NAME'" \
+                 "Termínala: aws ec2 terminate-instances --instance-ids $INSTANCIA"
+        IPS=$(aws ec2 describe-addresses \
+            --filters "Name=instance-id,Values=$INSTANCIA" \
+            --query 'Addresses[].AllocationId' --output text 2>/dev/null || true)
+        for IP in $IPS; do
+            problema "Dirección IP elástica $IP, asociada a esa instancia" \
+                     "Libérala: aws ec2 release-address --allocation-id $IP (después de terminar la instancia)"
+        done
+    done
+    problema "Grupo de seguridad '$NGINX_SG_NAME' ($NGINX_SG_ID)" \
+             "Elimínalo, después de terminar la instancia"
+fi
+
+BUCKET_NAME="eventhub-front-${AWS_ACCOUNT_ID}-${AWS_REGION}"
+if aws s3api head-bucket --bucket "$BUCKET_NAME" >/dev/null 2>&1; then
+    problema "Bucket de S3 '$BUCKET_NAME'" \
+             "Vacíalo y elimínalo: aws s3 rb s3://$BUCKET_NAME --force"
 fi
 
 # --- Balanceador, clúster de ECS, repositorios y logs (versiones 5.x)

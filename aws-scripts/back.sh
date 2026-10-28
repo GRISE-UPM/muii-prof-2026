@@ -178,10 +178,10 @@ fi
 echo "Esperando a que el servicio esté estable (puede tardar varios minutos)..."
 aws ecs wait services-stable --cluster "$CLUSTER_NAME" --services "$SERVICE_NAME"
 
-ALB_DNS=$(state_get LoadBalancerDns)
+PUBLIC_IP=$(state_get PublicIp)
 echo "La imagen queda en ECR y las tareas en ECS, detrás del balanceador. No van en el repositorio:"
 echo "  $IMAGE_URI"
-if [ -n "$ALB_DNS" ]; then
-    echo "  https://$ALB_DNS/api/eventos"
+if [ -n "$PUBLIC_IP" ]; then
+    echo "  https://$PUBLIC_IP/api/eventos"
 fi
 echo "Despliegue del backend finalizado."

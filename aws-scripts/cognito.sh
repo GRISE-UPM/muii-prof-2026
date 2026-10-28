@@ -65,10 +65,10 @@ case "$ACTION" in
             fi
         done
 
-        # Callback HTTPS del frontend: el nombre DNS del balanceador. LoadBalancerDns lo
-        # dejó alb.sh en lab-state.json.
-        ALB_DNS=$(state_require LoadBalancerDns)
-        CALLBACK_URL="https://${ALB_DNS}"
+        # Callback HTTPS del frontend: la IP elástica de la instancia con Nginx. PublicIp lo
+        # dejó nginx.sh en lab-state.json.
+        PUBLIC_IP=$(state_require PublicIp)
+        CALLBACK_URL="https://${PUBLIC_IP}"
         echo "Callback de Cognito: $CALLBACK_URL"
         echo "Dominio de Cognito: $COGNITO_DOMAIN"
 
