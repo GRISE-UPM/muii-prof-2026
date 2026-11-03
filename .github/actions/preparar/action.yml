@@ -1,0 +1,28 @@
+name: Preparar el acceso a AWS y a la instancia
+description: Asume el rol de despliegue por OIDC y deja la clave SSH donde la esperan los scripts
+
+inputs:
+  role-to-assume:
+    description: ARN del rol de despliegue
+    required: true
+  ssh-private-key:
+    description: Clave privada del par de claves de la instancia
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.role-to-assume }}
+        aws-region: us-east-1
+
+    # back.sh, front.sh y esperar-cloud-init.sh entran por SSH con esta clave
+    - name: Clave SSH
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+      run: |
+        mkdir -p ssh-key
+        printf '%s\n' "$SSH_PRIVATE_KEY" > ssh-key/labsuser.pem
+        chmod 600 ssh-key/labsuser.pem

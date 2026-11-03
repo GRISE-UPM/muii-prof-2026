@@ -1,0 +1,49 @@
+name: Infraestructura (PR)
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ["cdk/**"]          # Solo si el PR cambia la infraestructura
+
+permissions:
+  id-token: write              # Necesario para OIDC
+  contents: read
+  pull-requests: write         # Para comentar el diff en el PR
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cdk
+    steps:
+      - uses: actions/checkout@v4
+
+      # El CLI de CDK es un paquete de Node.js, sea cual sea el lenguaje del programa
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm install -g aws-cdk
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/github-cdk-diff
+          aws-region: us-east-1
+
+      # cdk.json ejecuta .venv/bin/python; en el runner se usa el Python de la acción
+      - run: cdk synth --quiet --app "python app.py"
+
+      - name: Publicar el diff en el PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Cambios de infraestructura"
+            echo '```'
+            cdk diff --no-color --app "python app.py" 2>&1
+            echo '```'
+          } > diff.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file diff.md
