@@ -5,7 +5,6 @@ Aplicación para gestionar eventos, compuesta por:
 - `eventhub-back-springboot`: API REST Spring Boot con JPA, H2 y OpenAPI.
 - `eventhub-front-react`: aplicación React/Vite para la interfaz web.
 - `cdk`: aplicación AWS CDK (Python) que define la instancia EC2 con Nginx, su IP elástica y su grupo de seguridad.
-- `.github/workflows`: despliegue a través de pull requests con GitHub Actions (`infra-pr.yml` e `infra-deploy.yml`).
 - `aws-scripts`: scripts para esperar a que Nginx esté instalado y publicar el backend y el frontend.
 
 ## Requisitos
@@ -21,24 +20,13 @@ Aplicación para gestionar eventos, compuesta por:
 
 ### Configura las credenciales de AWS:
 
-- Credenciales de una cuenta de AWS con permisos para crear stacks, roles IAM, instancias EC2 e IPs elásticas
-- Un par de claves EC2 llamado `vockey` en la región `us-east-1`, cuya clave privada debe estar en `ssh-key/labsuser.pem`
+- Descarga las credenciales desde AWS Academy y almacénalas en ~/aws/credentials
+- Descarga la SSH key y almacénala en ssh-key/
 
 ## Configuración inicial
 
 - Asigna permiso de ejecución a los ficheros .sh en aws-scripts/
-- Ejecuta `make bootstrap` una vez por cuenta y región (CDK crea un bucket y unos roles que usa al desplegar).
-- Esta versión no se puede desplegar en AWS Academy Learner Lab, ya que crea roles IAM. Para el laboratorio existe la versión `V1-CDK-learner-lab`.
-
-## Despliegue con GitHub Actions
-
-Nadie despliega desde su máquina. Un pull request que cambia `cdk/` ejecuta `infra-pr.yml` (`cdk synth` y un comentario con `cdk diff`), y el merge a `main` ejecuta `infra-deploy.yml`, con un trabajo por fase (`infra`, y después `back` y `front` a la vez). Cada trabajo llama al mismo script que `make deploy` usa en local, así que la lógica vive en `aws-scripts/` y se puede depurar sin GitHub. Los workflows se autentican en AWS con OIDC, sin claves guardadas. Hace falta configurar una vez en AWS y en GitHub:
-
-- Un proveedor de identidad OIDC para `token.actions.githubusercontent.com` y dos roles. `github-cdk-diff` (cuyo `sub` es `repo:<org>/<repo>:pull_request`) solo puede leer CloudFormation y asumir el rol de lookup del bootstrap. `github-cdk-deploy` (cuyo `sub` es `repo:<org>/<repo>:environment:produccion`) puede desplegar.
-- Un entorno `produccion` en GitHub (con aprobación manual si se quiere).
-- Un secreto `SSH_PRIVATE_KEY` con la clave privada del par `vockey`, para que los scripts publiquen el backend y el frontend.
-- Las variables `AWS_ACCOUNT_ID` del repositorio, con el identificador de la cuenta.
-- Proteger la rama `main` para exigir el PR, una aprobación y que pase `Infraestructura (PR) / diff`.
+- No hace falta `cdk bootstrap`: la aplicación usa `LegacyStackSynthesizer`, ya que el bootstrap crea roles IAM y el Learner Lab no lo permite.
 
 ## Despliegue con Make
 

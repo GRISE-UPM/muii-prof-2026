@@ -16,7 +16,8 @@ env = cdk.Environment(
     region=os.environ.get("CDK_DEFAULT_REGION", "us-east-1"),
 )
 
-# Sintetizador por defecto: la cuenta debe estar preparada una vez con `cdk bootstrap`
-EventHubStack(app, "EventHubStack", env=env)
+# Sin bootstrap: el stack no tiene assets, y el bootstrap crea roles IAM, que el Learner Lab
+# no permite.
+EventHubStack(app, "EventHubStack", env=env, synthesizer=cdk.LegacyStackSynthesizer())
 
 app.synth()

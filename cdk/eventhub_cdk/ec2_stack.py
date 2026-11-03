@@ -4,6 +4,7 @@ from pathlib import Path
 
 import aws_cdk as cdk
 from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_iam as iam
 from constructs import Construct
 
 # Imagen de Ubuntu 22.04 que Canonical mantiene actualizada en un parámetro público de SSM
@@ -14,7 +15,7 @@ class EventHubStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # La cuenta ya tiene una VPC por defecto; la pila no la crea
+        # AWS Academy ya tiene una VPC por defecto; la pila no la crea
         vpc = ec2.Vpc.from_lookup(self, "Vpc", is_default=True)
 
         # No se fija security_group_name (ec2.sh sí lo hacía, con eventhub-sg): CloudFormation
@@ -36,9 +37,16 @@ class EventHubStack(cdk.Stack):
             instance_type=ec2.InstanceType("t2.micro"),
             machine_image=ec2.MachineImage.from_ssm_parameter(UBUNTU_SSM),
             security_group=sg,
-            # Par de claves que ya existe en la cuenta, para el SSH de los despliegues
+            # Par de claves de AWS Academy, para el SSH de los despliegues
             key_pair=ec2.KeyPair.from_key_pair_name(self, "VocKey", "vockey"),
-            # Sin instance_profile: el L2 Instance crea un rol IAM propio y su perfil de instancia
+            # El L2 Instance crea por defecto un rol IAM y su perfil, que el laboratorio no permite.
+            # Se reutiliza el perfil que ya existe. Hay que importarlo con su rol: si solo se da el
+            # nombre del perfil, el L2 sigue creando un rol propio.
+            instance_profile=iam.InstanceProfile.from_instance_profile_attributes(
+                self, "LabInstanceProfile",
+                instance_profile_arn=f"arn:aws:iam::{self.account}:instance-profile/LabInstanceProfile",
+                role=iam.Role.from_role_arn(self, "LabRole", f"arn:aws:iam::{self.account}:role/LabRole"),
+            ),
             user_data=user_data,
         )
 

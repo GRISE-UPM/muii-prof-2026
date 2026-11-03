@@ -6,7 +6,7 @@ CDK_DIR := cdk
 # Sin esto, jsii avisa en cada ejecución si tu versión de Node ya no tiene soporte
 export JSII_SILENCE_WARNING_UNTESTED_NODE_VERSION := 1
 
-.PHONY: venv bootstrap synth diff deploy delete
+.PHONY: venv synth diff deploy delete
 
 # Entorno virtual de Python con las librerías de CDK. Se crea una vez.
 venv: $(CDK_DIR)/.venv
@@ -14,10 +14,6 @@ $(CDK_DIR)/.venv: $(CDK_DIR)/requirements.txt
 	python3 -m venv $(CDK_DIR)/.venv
 	$(CDK_DIR)/.venv/bin/pip install -q -r $(CDK_DIR)/requirements.txt
 	touch $(CDK_DIR)/.venv
-
-# Prepara la cuenta y la región para CDK (roles, bucket de assets). Se hace una vez por cuenta.
-bootstrap: venv
-	cd $(CDK_DIR) && cdk bootstrap
 
 # Genera la plantilla de CloudFormation en cdk/cdk.out y no despliega nada
 synth: venv
