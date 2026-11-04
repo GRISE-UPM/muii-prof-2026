@@ -14,8 +14,10 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/stack-functions.sh"
 KEY_PATH="$PROJECT_ROOT/ssh-key/labsuser.pem"
 
-# PublicIp es una salida de la pila de CDK (EventHubStack).
-PUBLIC_IP=$(salida_requerida EventHubStack PublicIp)
+# PublicIp es una salida de la pila de CDK. La pila es EventHubStack, salvo que se indique otra
+# en STACK_NAME (la vista previa de un PR es EventHubStack-pr-<número>).
+STACK_NAME="${STACK_NAME:-EventHubStack}"
+PUBLIC_IP=$(salida_requerida "$STACK_NAME" PublicIp)
 
 if [ ! -f "$KEY_PATH" ]; then
     echo "Error: No se encontró la clave SSH en: $KEY_PATH"

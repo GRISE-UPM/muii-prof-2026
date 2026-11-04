@@ -1,0 +1,67 @@
+name: Infraestructura (despliegue)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:           # Para relanzarlo a mano si la sesión del laboratorio había caducado
+
+concurrency: produccion        # Nunca dos despliegues a la vez
+
+permissions:
+  contents: read
+
+# Cada fase es un trabajo y llama al mismo script que usa `make deploy` en local:
+# la lógica vive en aws-scripts/, no en este fichero.
+jobs:
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm install -g aws-cdk
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: ./.github/actions/preparar
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - run: make venv
+      - run: cd cdk && cdk deploy --require-approval never
+      # CloudFormation da la instancia por creada antes de que Nginx este instalado
+      - run: bash aws-scripts/esperar-cloud-init.sh
+
+  # back y front no dependen entre si: se ejecutan a la vez cuando termina infra.
+  # Leen la IP de las salidas de la pila, asi que no hay que pasar nada entre trabajos.
+  back:
+    needs: infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: ./.github/actions/preparar
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      - run: bash aws-scripts/back.sh
+
+  front:
+    needs: infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: ./.github/actions/preparar
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      - run: bash aws-scripts/front.sh

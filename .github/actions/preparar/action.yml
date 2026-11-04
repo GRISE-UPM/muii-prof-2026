@@ -1,0 +1,36 @@
+name: Preparar el acceso a AWS y a la instancia
+description: Configura las credenciales de la sesión del laboratorio y deja la clave SSH donde la esperan los scripts
+
+inputs:
+  aws-access-key-id:
+    description: Credencial del laboratorio (aws_access_key_id)
+    required: true
+  aws-secret-access-key:
+    description: Credencial del laboratorio (aws_secret_access_key)
+    required: true
+  aws-session-token:
+    description: Credencial del laboratorio (aws_session_token)
+    required: true
+  ssh-private-key:
+    description: Clave privada del par de claves vockey
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+        aws-session-token: ${{ inputs.aws-session-token }}
+        aws-region: us-east-1
+
+    # back.sh, front.sh y esperar-cloud-init.sh entran por SSH con esta clave
+    - name: Clave SSH
+      shell: bash
+      env:
+        SSH_PRIVATE_KEY: ${{ inputs.ssh-private-key }}
+      run: |
+        mkdir -p ssh-key
+        printf '%s\n' "$SSH_PRIVATE_KEY" > ssh-key/labsuser.pem
+        chmod 600 ssh-key/labsuser.pem

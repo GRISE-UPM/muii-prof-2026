@@ -5,6 +5,7 @@ Aplicación para gestionar eventos, compuesta por:
 - `eventhub-back-springboot`: API REST Spring Boot con JPA, H2 y OpenAPI.
 - `eventhub-front-react`: aplicación React/Vite para la interfaz web.
 - `cdk`: aplicación AWS CDK (Python) que define la instancia EC2 con Nginx, su IP elástica y su grupo de seguridad.
+- `.github/workflows`: despliegue a través de pull requests con GitHub Actions (`infra-pr.yml` e `infra-deploy.yml`).
 - `aws-scripts`: scripts para esperar a que Nginx esté instalado y publicar el backend y el frontend.
 
 ## Requisitos
@@ -27,6 +28,16 @@ Aplicación para gestionar eventos, compuesta por:
 
 - Asigna permiso de ejecución a los ficheros .sh en aws-scripts/
 - No hace falta `cdk bootstrap`: la aplicación usa `LegacyStackSynthesizer`, ya que el bootstrap crea roles IAM y el Learner Lab no lo permite.
+
+## Despliegue con GitHub Actions
+
+Un pull request ejecuta `infra-pr.yml`, con tres trabajos. `diff` comenta el `cdk diff` respecto a la pila de producción. `preview` despliega la aplicación completa en una pila aparte, `EventHubStack-pr-<número>`, y comenta su dirección. `limpieza` borra esa pila al cerrar el PR. El merge a `main` ejecuta `infra-deploy.yml`, con un trabajo por fase (`infra`, y después `back` y `front` a la vez). Cada trabajo llama al mismo script que `make deploy` usa en local. Como el laboratorio no permite OIDC, los workflows usan las credenciales de la sesión, que caducan con ella. Hace falta configurar en el repositorio (*Settings > Secrets and variables > Actions*):
+
+- Los secretos `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` y `AWS_SESSION_TOKEN`, con los valores de *AWS Details > AWS CLI*. Hay que actualizarlos cada vez que se pulsa *Start Lab*.
+- El secreto `SSH_PRIVATE_KEY`, con el contenido de la clave privada `vockey` (`labsuser.pem`).
+- Proteger la rama `main` para exigir el PR y que pasen `diff` y `preview`.
+
+Si un merge se hizo con la sesión caducada, el despliegue falla. Tras actualizar los secretos, se relanza desde la pestaña *Actions* (*Run workflow*).
 
 ## Despliegue con Make
 

@@ -1,0 +1,113 @@
+name: Infraestructura (PR)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  contents: read
+  pull-requests: write         # Para comentar en el PR
+
+env:
+  # Cada PR tiene su propia pila, EventHubStack-pr-<número>, separada de la de producción
+  ENTORNO: pr-${{ github.event.number }}
+  STACK_NAME: EventHubStack-pr-${{ github.event.number }}
+
+jobs:
+  # Qué cambiaría en producción si se hiciera merge: se compara con la pila EventHubStack
+  diff:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cdk
+    steps:
+      - uses: actions/checkout@v4
+      # El CLI de CDK es un paquete de Node.js, sea cual sea el lenguaje del programa
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm install -g aws-cdk
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+
+      # Sin OIDC: el laboratorio no permite crear roles. Las credenciales de la sesión están
+      # guardadas como secretos del repositorio y caducan con ella.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      # cdk.json ejecuta .venv/bin/python; en el runner se usa el Python de la acción
+      - run: cdk synth --quiet --app "python app.py"
+
+      - name: Publicar el diff en el PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Cambios de infraestructura (producción)"
+            echo '```'
+            cdk diff --no-color --app "python app.py" 2>&1
+            echo '```'
+          } > diff.md
+          gh pr comment ${{ github.event.pull_request.number }} --body-file diff.md
+
+  # Despliega la aplicación completa en una pila aparte, para probarla antes del merge
+  preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm install -g aws-cdk
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - uses: ./.github/actions/preparar
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - run: make venv
+      - run: cd cdk && cdk deploy --require-approval never -c entorno=$ENTORNO
+      # Los scripts leen la IP de la pila indicada en STACK_NAME
+      - run: bash aws-scripts/esperar-cloud-init.sh
+      - run: bash aws-scripts/back.sh
+      - run: bash aws-scripts/front.sh
+
+      - name: Comentar la dirección de la vista previa
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          IP=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+            --query "Stacks[0].Outputs[?OutputKey=='PublicIp'].OutputValue" --output text)
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "Vista previa desplegada en http://$IP/"
+
+  # Al cerrar el PR (con o sin merge) se borra la vista previa
+  limpieza:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: npm install -g aws-cdk
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+      - run: pip install -r cdk/requirements.txt
+      - run: cd cdk && cdk destroy --force --app "python app.py" -c entorno=$ENTORNO

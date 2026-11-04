@@ -18,6 +18,10 @@ env = cdk.Environment(
 
 # Sin bootstrap: el stack no tiene assets, y el bootstrap crea roles IAM, que el Learner Lab
 # no permite.
-EventHubStack(app, "EventHubStack", env=env, synthesizer=cdk.LegacyStackSynthesizer())
+# Sin contexto es la pila de producción. Con `-c entorno=pr-7` se despliega una copia aparte
+# con su propio nombre, que es la vista previa de un pull request.
+entorno = app.node.try_get_context("entorno")
+nombre = f"EventHubStack-{entorno}" if entorno else "EventHubStack"
+EventHubStack(app, nombre, env=env, synthesizer=cdk.LegacyStackSynthesizer())
 
 app.synth()
