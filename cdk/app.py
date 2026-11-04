@@ -19,7 +19,13 @@ env = cdk.Environment(
 # Sin bootstrap: el stack no tiene assets, y el bootstrap crea roles IAM, que el Learner Lab
 # no permite.
 # Sin contexto es la pila de producción. Con `-c entorno=pr-7` se despliega una copia aparte
-# con su propio nombre, que es la vista previa de un pull request.
+# con su propio nombre, que es la vista previa de un pull request. Sin `-c`, como en un
+# `cdk deploy` local o en el despliegue al hacer merge, la pila se llama EventHubStack.
+# `entorno` es un nombre elegido por nosotros, no algo que definan CDK o GitHub. Lo pasa el
+# workflow infra-pr.yml como `-c entorno=pr-<número del PR>`, y el número sí lo da GitHub
+# (github.event.number). El nombre de la pila se repite en la variable STACK_NAME de ese
+# workflow, que es la que leen back.sh, front.sh y esperar-cloud-init.sh, así que ambos deben
+# coincidir.
 entorno = app.node.try_get_context("entorno")
 nombre = f"EventHubStack-{entorno}" if entorno else "EventHubStack"
 EventHubStack(app, nombre, env=env, synthesizer=cdk.LegacyStackSynthesizer())
