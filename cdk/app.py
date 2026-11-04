@@ -26,10 +26,9 @@ env = cdk.Environment(
 # de un pull request.
 #
 # `entorno` es un nombre elegido por nosotros, no algo que definan CDK o GitHub. Lo pasa el
-# workflow infra-pr.yml como `-c entorno=$ENTORNO`, siendo $ENTORNO = pr-${{ github.event.number }}
+# workflow infra-pr.yml como `-c entorno=$ENTORNO`, siendo $ENTORNO = pr-${{ github.event.number }}.
 # El nombre de la pila se repite en la variable STACK_NAME de ese workflow, que es
 # la que leen back.sh, front.sh y esperar-cloud-init.sh, así que ambos deben coincidir.
-
 entorno = app.node.try_get_context("entorno")
 nombre = f"EventHubStack-{entorno}" if entorno else "EventHubStack"
 
