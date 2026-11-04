@@ -28,7 +28,7 @@ Aplicación para gestionar eventos, compuesta por:
 
 - Asigna permiso de ejecución a los ficheros .sh en aws-scripts/
 - Ejecuta `make bootstrap` una vez por cuenta y región (CDK crea un bucket y unos roles que usa al desplegar).
-- Esta versión no se puede desplegar en AWS Academy Learner Lab, ya que crea roles IAM. Para el laboratorio existe la versión `V1-CDK-learner-lab`.
+- Esta versión no se puede desplegar en AWS Academy Learner Lab, ya que crea roles IAM. Para el laboratorio existe la versión `V1.0.0-CDK-learner-lab`.
 
 ## Despliegue con GitHub Actions
 
