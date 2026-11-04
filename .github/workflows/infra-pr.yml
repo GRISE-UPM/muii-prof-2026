@@ -21,7 +21,7 @@ jobs:
 
       # El CLI de CDK es un paquete de Node.js, sea cual sea el lenguaje del programa
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - run: npm install -g aws-cdk
 
       - uses: actions/setup-python@v5
