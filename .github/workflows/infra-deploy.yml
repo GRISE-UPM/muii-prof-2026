@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - run: npm install -g aws-cdk
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with: { node-version: "22" }
       - uses: ./.github/actions/preparar
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
